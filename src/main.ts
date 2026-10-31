@@ -8,12 +8,24 @@ import {
   getHandMidpoint2D,
   Point2D,
 } from './analysis/phaseDetector';
+import {
+  calculateSwingMetrics,
+  computeImprovedFaults,
+  evaluateSwingFaultDetails,
+  FAULT_LABELS,
+  formatMetricsForDisplay,
+  rankSwingFaults,
+} from './analysis/metricsCalculator';
+import { alignAndScoreSwing } from './analysis/referenceAligner';
 import { drawPoseSkeletonOverlay } from './visuals/canvasOverlay';
 import { SpeechCoach, MOCK_SWING_SCENARIOS } from './coaching/speechCoach';
 import {
+  CoachingPayload,
   Handedness,
   PoseModelVariant,
+  SwingFault,
   SwingFrame,
+  SwingMetrics,
   SwingPhases,
   SwingRecording,
 } from './types';
@@ -75,6 +87,12 @@ const setReferenceBtn = document.getElementById('set-reference-btn') as HTMLButt
 const downloadJsonBtn = document.getElementById('download-json-btn') as HTMLButtonElement;
 const saveStatusBanner = document.getElementById('save-status-banner') as HTMLDivElement;
 
+// Sidebar — Biomechanical Metrics & Fault Ranking
+const metricsMatchBadge = document.getElementById('metrics-match-badge') as HTMLSpanElement;
+const improvedFaultsBanner = document.getElementById('improved-faults-banner') as HTMLDivElement;
+const faultsRankedList = document.getElementById('faults-ranked-list') as HTMLDivElement;
+const metricsGrid9 = document.getElementById('metrics-grid-9') as HTMLDivElement;
+
 // Sidebar — Phase Detection & Tempo
 const tempoBadge = document.getElementById('tempo-badge') as HTMLSpanElement;
 const phaseAddressEl = document.getElementById('phase-address') as HTMLSpanElement;
@@ -96,8 +114,10 @@ const checklistItems = document.getElementById('checklist-items') as HTMLUListEl
 
 // AI Speech Coach UI Elements
 const coachSourceBadge = document.getElementById('coach-source-badge') as HTMLSpanElement;
+const coachAutoBtn = document.getElementById('coach-auto-btn') as HTMLButtonElement;
 const coachMuteBtn = document.getElementById('coach-mute-btn') as HTMLButtonElement;
 const coachReplayBtn = document.getElementById('coach-replay-btn') as HTMLButtonElement;
+const coachResetBtn = document.getElementById('coach-reset-btn') as HTMLButtonElement;
 const coachMatchScore = document.getElementById('coach-match-score') as HTMLSpanElement;
 const coachFaultTag = document.getElementById('coach-fault-tag') as HTMLSpanElement;
 const coachDrillName = document.getElementById('coach-drill-name') as HTMLSpanElement;
@@ -130,9 +150,86 @@ let liveHandTrail: Point2D[] = [];
 let lastCapturedFrames: SwingFrame[] = [];
 let lastCapturedPhases: SwingPhases | null = null;
 let lastRecording: SwingRecording | null = null;
+let savedReferenceRecording: SwingRecording | null = null;
 let referenceHandPath: Point2D[] = [];
 
+// Multi-swing Coaching & Fault Progression State
+let autoCoachEnabled = true;
+let sessionSwingCount = 0;
+let previousFaults: SwingFault[] = [];
+let previousFocusFault: SwingFault | null = null;
+
 laptopVideo.classList.toggle('mirrored', isMirrored);
+
+/**
+ * Renders the 9 Biomechanical Metrics grid and ranked faults list in the sidebar.
+ */
+function renderBiomechanicalMetricsUI(
+  metrics: SwingMetrics,
+  matchScore: number,
+  improvedFaults: SwingFault[] = []
+): void {
+  metricsMatchBadge.textContent = `Match: ${matchScore}%`;
+  coachMatchScore.textContent = `${matchScore}%`;
+
+  // Improved since last swing banner
+  if (improvedFaults.length > 0) {
+    const names = improvedFaults.map((f) => FAULT_LABELS[f] || f.replace(/_/g, ' '));
+    improvedFaultsBanner.textContent = `✨ Fixed since last swing: ${names.join(', ')}`;
+    improvedFaultsBanner.classList.remove('hidden');
+  } else {
+    improvedFaultsBanner.classList.add('hidden');
+  }
+
+  // Ranked faults list
+  const faultEvaluations = evaluateSwingFaultDetails(metrics);
+  faultsRankedList.innerHTML = '';
+
+  if (faultEvaluations.length === 0) {
+    const cleanDiv = document.createElement('div');
+    cleanDiv.className = 'fault-clean-state';
+    cleanDiv.textContent = '✓ Clean Swing — All 9 Biomechanical Metrics on Target!';
+    faultsRankedList.appendChild(cleanDiv);
+  } else {
+    faultEvaluations.forEach((ev, idx) => {
+      const row = document.createElement('div');
+      row.className = `fault-item-row ${idx === 0 ? 'primary-fault' : ''}`;
+
+      const badge = document.createElement('span');
+      badge.className = 'fault-rank-badge';
+      badge.textContent = idx === 0 ? '#1 FOCUS' : `#${idx + 1}`;
+
+      const title = document.createElement('span');
+      title.className = 'fault-item-title';
+      title.textContent = ev.label;
+
+      const vals = document.createElement('span');
+      vals.className = 'fault-item-vals';
+      vals.textContent = `${ev.measuredText} (${ev.targetText})`;
+
+      row.appendChild(badge);
+      row.appendChild(title);
+      row.appendChild(vals);
+      faultsRankedList.appendChild(row);
+    });
+  }
+
+  // 9 Biomechanical Metrics Grid
+  const displayItems = formatMetricsForDisplay(metrics);
+  for (const item of displayItems) {
+    const cell = metricsGrid9.querySelector(
+      `.metric-cell[data-metric="${item.key}"]`
+    ) as HTMLDivElement | null;
+    const valEl = document.getElementById(`m-val-${item.key}`);
+    if (valEl) {
+      valEl.textContent = item.formattedValue;
+    }
+    if (cell) {
+      cell.classList.remove('status-good', 'status-warn', 'status-bad');
+      cell.classList.add(`status-${item.status}`);
+    }
+  }
+}
 
 // Initialize SpeechCoach
 const speechCoach = new SpeechCoach({
@@ -144,13 +241,13 @@ const speechCoach = new SpeechCoach({
       coachStatusText.textContent = 'Listening to microphone... (release Spacebar to send)';
       pttBtn.innerHTML = '🔴 Listening... Release <strong>SPACEBAR</strong> to Send';
     } else if (status === 'thinking') {
-      coachStatusText.textContent = 'Coach is thinking...';
+      coachStatusText.textContent = 'Coach is analyzing swing biomechanics...';
       pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
     } else if (status === 'speaking') {
       coachStatusText.textContent = 'Coach is speaking aloud...';
       pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
     } else {
-      coachStatusText.textContent = 'Ready — hold Spacebar to ask a question';
+      coachStatusText.textContent = 'Ready — swing or hold Spacebar to ask a question';
       pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
     }
   },
@@ -159,7 +256,8 @@ const speechCoach = new SpeechCoach({
   },
   onCoachResponse: (res, payload) => {
     coachMatchScore.textContent = `${payload.match_score}%`;
-    coachFaultTag.textContent = res.fault === 'none' ? 'Pure Swing' : res.fault.replace(/_/g, ' ');
+    coachFaultTag.textContent =
+      res.fault === 'none' ? 'Pure Swing' : res.fault.replace(/_/g, ' ');
     coachFaultTag.classList.toggle('none', res.fault === 'none');
     coachDrillName.textContent = res.drill;
     coachQuote.textContent = `"${res.spoken}"`;
@@ -211,12 +309,20 @@ async function checkBackendHealth(): Promise<void> {
   }
 }
 
-// Wire up simulated swing buttons
+// Wire up simulated swing buttons (also populates Biomechanical Metrics & Fault Ranking UI)
 document.querySelectorAll('.btn-sim').forEach((btn) => {
   btn.addEventListener('click', () => {
     const key = (btn as HTMLButtonElement).dataset.sim as 'bad' | 'improved' | 'pure';
     const scenario = MOCK_SWING_SCENARIOS[key];
     if (scenario) {
+      renderBiomechanicalMetricsUI(
+        scenario.metrics,
+        scenario.match_score,
+        scenario.improved_since_last
+      );
+      statBackswingMs.textContent = `${scenario.metrics.backswing_ms} ms`;
+      statDownswingMs.textContent = `${scenario.metrics.downswing_ms} ms`;
+      tempoBadge.textContent = `Tempo: ${scenario.metrics.tempo_ratio} : 1`;
       speechCoach.requestSwingCoaching(scenario);
     }
   });
@@ -236,6 +342,12 @@ qaForm.addEventListener('submit', (e) => {
   speechCoach.askCoachQuestion(q);
 });
 
+coachAutoBtn.addEventListener('click', () => {
+  autoCoachEnabled = !autoCoachEnabled;
+  coachAutoBtn.classList.toggle('active', autoCoachEnabled);
+  coachAutoBtn.textContent = autoCoachEnabled ? '⚡ Auto' : 'Auto: OFF';
+});
+
 coachMuteBtn.addEventListener('click', () => {
   const nextMuted = !speechCoach.getMuted();
   speechCoach.setMuted(nextMuted);
@@ -244,6 +356,16 @@ coachMuteBtn.addEventListener('click', () => {
 
 coachReplayBtn.addEventListener('click', () => {
   speechCoach.replayLastSpoken();
+});
+
+coachResetBtn.addEventListener('click', async () => {
+  sessionSwingCount = 0;
+  previousFaults = [];
+  previousFocusFault = null;
+  improvedFaultsBanner.classList.add('hidden');
+  await speechCoach.resetSession();
+  coachQuote.textContent =
+    '"Session memory cleared. Step up to the ball for Swing #1 whenever you are ready."';
 });
 
 /**
@@ -269,22 +391,28 @@ async function loadSavedReference(): Promise<void> {
     if (!res.ok) return;
     const ref: SwingRecording = await res.json();
     if (Array.isArray(ref.frames) && ref.frames.length > 1) {
+      savedReferenceRecording = ref;
       referenceHandPath = ref.frames.map((f) => getHandMidpoint2D(f.landmarks));
     }
   } catch {
-    // Reference swing is optional in Step 2
+    // Reference swing is optional
   }
 }
 
 /**
  * Callback fired by SwingCaptureFSM when a full swing has been captured.
- * Runs phase detection, updates UI, and persists keypoints JSON to backend (`POST /api/swings`).
+ * 1. Detects the 5 swing phases & tempo
+ * 2. Computes all 9 biomechanical metrics deterministically (`calculateSwingMetrics`)
+ * 3. Ranks swing faults by normalized severity (`rankSwingFaults`)
+ * 4. Computes reference match score (`alignAndScoreSwing`)
+ * 5. Updates the UI & persists the recording to `POST /api/swings`
+ * 6. Automatically triggers `speechCoach.requestSwingCoaching(payload)` for hands-free spoken coaching
  */
 captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
   lastCapturedFrames = frames;
   liveHandTrail = [];
 
-  // Run Phase Detection (Address, Takeaway, Top, Impact, Finish)
+  // 1. Run Phase Detection (Address, Takeaway, Top, Impact, Finish)
   const phases = detectSwingPhases(frames, handedness);
   lastCapturedPhases = phases;
 
@@ -301,6 +429,27 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
   statDownswingMs.textContent = `${downswingMs} ms`;
   tempoBadge.textContent = `Tempo: ${tempoRatio} : 1`;
 
+  // 2. Compute 9 Biomechanical Metrics & Rank Faults Deterministically
+  const metrics = calculateSwingMetrics(frames, phases, handedness);
+  const faultsRanked = rankSwingFaults(metrics);
+  const alignment = alignAndScoreSwing(
+    frames,
+    phases,
+    metrics,
+    savedReferenceRecording
+  );
+  const matchScore = alignment.matchScore;
+
+  // 3. Track Multi-Swing Fault Improvement
+  sessionSwingCount += 1;
+  const improvedSinceLast =
+    sessionSwingCount > 1
+      ? computeImprovedFaults(previousFaults, faultsRanked, previousFocusFault)
+      : [];
+
+  // 4. Update Biomechanical Metrics & Ranked Faults UI Card
+  renderBiomechanicalMetricsUI(metrics, matchScore, improvedSinceLast);
+
   const recordingId = `swing-${Date.now()}`;
   const recording: SwingRecording = {
     id: recordingId,
@@ -310,6 +459,9 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
     fps: currentMeasuredFps || 60,
     frames,
     phases,
+    metrics,
+    faultsRanked,
+    matchScore,
   };
   lastRecording = recording;
 
@@ -317,7 +469,34 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
   downloadJsonBtn.disabled = false;
   updateForceButtonUI('DONE');
 
-  // Persist SwingRecording JSON to Express server (data/swings/swing-<timestamp>.json)
+  // 5. Trigger Automatic Post-Swing Speech Coaching (Non-blocking alongside save)
+  const coachingPayload: CoachingPayload = {
+    swing_number: sessionSwingCount,
+    match_score: matchScore,
+    metrics,
+    faults_ranked: faultsRanked,
+    previous_focus: previousFocusFault,
+    improved_since_last: improvedSinceLast,
+    handedness,
+  };
+
+  previousFaults = faultsRanked;
+  previousFocusFault = faultsRanked[0] ?? null;
+
+  if (autoCoachEnabled) {
+    speechCoach
+      .requestSwingCoaching(coachingPayload)
+      .then((res) => {
+        if (res.fault && res.fault !== 'none') {
+          previousFocusFault = res.fault as SwingFault;
+        }
+      })
+      .catch((err) => {
+        console.warn('Automatic post-swing speech coaching error:', err);
+      });
+  }
+
+  // 6. Persist SwingRecording JSON to Express server (data/swings/swing-<timestamp>.json)
   try {
     const res = await fetch('/api/swings', {
       method: 'POST',
@@ -327,12 +506,12 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
     if (res.ok) {
       const data = await res.json();
       saveStatusBanner.classList.remove('hidden');
-      saveStatusBanner.textContent = `✓ Saved ${frames.length} frames to ${data.filename}`;
+      saveStatusBanner.textContent = `✓ Swing #${sessionSwingCount} (${matchScore}%) saved to ${data.filename}`;
     }
   } catch (err) {
     console.warn('Could not persist swing to backend API (offline mode):', err);
     saveStatusBanner.classList.remove('hidden');
-    saveStatusBanner.textContent = `✓ Captured ${frames.length} frames locally (Click ⬇ JSON to save)`;
+    saveStatusBanner.textContent = `✓ Swing #${sessionSwingCount} (${matchScore}%) captured locally (Click ⬇ JSON to save)`;
   }
 });
 
@@ -422,8 +601,8 @@ function updateViewLayout(): void {
     checklistTitle.textContent = '💻 Laptop Face-On (Landscape)';
     checklistItems.innerHTML = `
       <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s until the beep locks address.</li>
-      <li><strong>Finish Trigger:</strong> Bring wrists above shoulders on the lead side and hold for 0.5s (or 1.0s post-impact auto-stop).</li>
-      <li><strong>One Euro Smoothing:</strong> 33 2D &amp; 3D landmarks smoothed with adaptive cutoff (minCutoff=1.2, β=0.08).</li>
+      <li><strong>9 Biomechanical Metrics:</strong> Head movement, hip sway &amp; weight shift anchored in cm (torso=50cm); rotations &amp; lead arm angle blended in 3D+2D.</li>
+      <li><strong>Auto Voice Coaching:</strong> Speaks personalized Gemini feedback immediately after finish.</li>
     `;
   } else if (viewMode === 'dtl') {
     checklistTitle.textContent = '📱 Phone DroidCam (Portrait)';
@@ -432,10 +611,10 @@ function updateViewLayout(): void {
       <li><strong>Tush Line &amp; Plane:</strong> Tracks swing plane and hip depth wall.</li>
     `;
   } else {
-    checklistTitle.textContent = '⚡ 90° Dual View + Pose Capture';
+    checklistTitle.textContent = '⚡ 90° Dual View + Auto AI Coach';
     checklistItems.innerHTML = `
       <li><strong>Address Lock (1.0s):</strong> Stand in front of the Laptop camera with hands below hips for 1s to auto-start recording.</li>
-      <li><strong>Phase Detection:</strong> Automatically identifies <em>Address, Takeaway, Top, Impact,</em> and <em>Finish</em> + Tempo Ratio.</li>
+      <li><strong>Deterministic Fault Ranking:</strong> Ranks all 9 metrics by severity and automatically triggers spoken coaching on completion.</li>
       <li><strong>Manual Override:</strong> Use <strong>Force Start/Stop</strong> in tight spaces.</li>
     `;
   }
@@ -928,6 +1107,7 @@ clearTrailBtn.addEventListener('click', () => {
 
 setReferenceBtn.addEventListener('click', async () => {
   if (!lastRecording) return;
+  savedReferenceRecording = lastRecording;
   referenceHandPath = lastRecording.frames.map((f) => getHandMidpoint2D(f.landmarks));
   try {
     const res = await fetch('/api/reference', {

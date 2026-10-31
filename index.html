@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Golf Swing Coach — Pose, Phase Detection &amp; AI Speech Coach</title>
+    <title>Golf Swing Coach — Pose, Biomechanical Metrics &amp; AI Speech Coach</title>
   </head>
   <body>
     <div id="app">
@@ -12,7 +12,7 @@
         <div class="brand">
           <span class="brand-dot"></span>
           <h1>Golf Swing Coach</h1>
-          <span class="phase-tag">Pose Capture + AI Speech Coach</span>
+          <span class="phase-tag">Biomechanical Metrics + AI Speech Coach</span>
         </div>
 
         <div class="controls-bar">
@@ -167,7 +167,7 @@
           </div>
         </section>
 
-        <!-- Right Sidebar: AI Speech Coach, Swing Capture FSM, Phase Detection, & Camera Diagnostics -->
+        <!-- Right Sidebar: AI Speech Coach, Swing Capture FSM, Biomechanical Metrics, Phase Detection & Diagnostics -->
         <aside class="side-panel">
           <!-- Card 1: AI Speech Coach & Voice Q&A -->
           <div class="card coach-card">
@@ -175,8 +175,10 @@
               <h2>🎙️ AI Swing Coach</h2>
               <div class="row-inline">
                 <span class="coach-badge" id="coach-source-badge">Checking API...</span>
+                <button id="coach-auto-btn" class="btn btn-xs active" title="Automatically speak coaching immediately after every captured swing">⚡ Auto</button>
                 <button id="coach-mute-btn" class="btn btn-xs" title="Mute / Unmute spoken TTS">🔊 TTS</button>
                 <button id="coach-replay-btn" class="btn btn-xs" title="Replay last spoken feedback">↺</button>
+                <button id="coach-reset-btn" class="btn btn-xs" title="Reset multi-swing coaching session history">Reset</button>
               </div>
             </div>
 
@@ -293,7 +295,99 @@
             <div id="save-status-banner" class="save-status hidden"></div>
           </div>
 
-          <!-- Card 3: Detected Swing Phases & Tempo -->
+          <!-- Card 3: Biomechanical Metrics & Deterministic Fault Ranking -->
+          <div class="card">
+            <div class="card-header-row">
+              <h2>📐 Biomechanical Metrics (9)</h2>
+              <span class="tempo-pill" id="metrics-match-badge">Match: —</span>
+            </div>
+
+            <div id="improved-faults-banner" class="improved-banner hidden"></div>
+
+            <div class="faults-ranked-section">
+              <span class="sub-label">Ranked Faults (Highest Severity First):</span>
+              <div id="faults-ranked-list" class="faults-ranked-list">
+                <div class="fault-empty-state">Capture or simulate a swing to compute metrics...</div>
+              </div>
+            </div>
+
+            <div class="metrics-grid-9" id="metrics-grid-9">
+              <div class="metric-cell" data-metric="tempo_ratio">
+                <div class="metric-cell-top">
+                  <span class="metric-name">Tempo Ratio</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-tempo_ratio">—</div>
+                <div class="metric-target">Target ~3.0:1</div>
+              </div>
+              <div class="metric-cell" data-metric="lead_arm_deg">
+                <div class="metric-cell-top">
+                  <span class="metric-name">Lead Arm (Top)</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-lead_arm_deg">—</div>
+                <div class="metric-target">Target &gt;160°</div>
+              </div>
+              <div class="metric-cell" data-metric="shoulder_turn_deg">
+                <div class="metric-cell-top">
+                  <span class="metric-name">Shoulder Turn</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-shoulder_turn_deg">—</div>
+                <div class="metric-target">Target 80–90°</div>
+              </div>
+              <div class="metric-cell" data-metric="hip_turn_deg">
+                <div class="metric-cell-top">
+                  <span class="metric-name">Hip Turn</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-hip_turn_deg">—</div>
+                <div class="metric-target">Target 40–50°</div>
+              </div>
+              <div class="metric-cell" data-metric="x_factor_deg">
+                <div class="metric-cell-top">
+                  <span class="metric-name">X-Factor</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-x_factor_deg">—</div>
+                <div class="metric-target">Target ~40°</div>
+              </div>
+              <div class="metric-cell" data-metric="spine_angle_change_deg">
+                <div class="metric-cell-top">
+                  <span class="metric-name">Spine Δ (Impact)</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-spine_angle_change_deg">—</div>
+                <div class="metric-target">Target &lt;5.0°</div>
+              </div>
+              <div class="metric-cell" data-metric="head_movement_cm">
+                <div class="metric-cell-top">
+                  <span class="metric-name">Head Movement</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-head_movement_cm">—</div>
+                <div class="metric-target">Target &lt;5.0 cm</div>
+              </div>
+              <div class="metric-cell" data-metric="hip_sway_cm">
+                <div class="metric-cell-top">
+                  <span class="metric-name">Hip Sway</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-hip_sway_cm">—</div>
+                <div class="metric-target">Target &lt;5.0 cm</div>
+              </div>
+              <div class="metric-cell" data-metric="weight_shift_cm">
+                <div class="metric-cell-top">
+                  <span class="metric-name">Weight Shift</span>
+                  <span class="metric-dot"></span>
+                </div>
+                <div class="metric-val" id="m-val-weight_shift_cm">—</div>
+                <div class="metric-target">Target ≥3.0 cm</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Card 4: Detected Swing Phases & Tempo -->
           <div class="card">
             <div class="card-header-row">
               <h2>⏱️ Phase Detection &amp; Tempo</h2>
@@ -344,7 +438,7 @@
             </div>
           </div>
 
-          <!-- Card 4: Camera Assignment & Framing Checklist -->
+          <!-- Card 5: Camera Assignment & Framing Checklist -->
           <div class="card">
             <h2>📱 Camera Assignment</h2>
             <div id="phone-detect-banner" class="banner banner-info">

@@ -647,10 +647,8 @@ function updateViewLayout(): void {
     checklistItems.innerHTML = `
       <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s until the beep locks address.</li>
       <li><strong>9 Biomechanical Metrics:</strong> Head movement, hip sway &amp; weight shift anchored in cm (torso=50cm); rotations &amp; lead arm angle blended in 3D+2D.</li>
-      <li><strong>Auto Voice Coaching:</strong> Speaks personalized Gemini feedback immediately after finish.</li>
-      <li><strong>Bilateral Skeleton:</strong> Tracks shoulders, hips, lead arm angle, head stability, and lateral sway.</li>
       <li><strong>Optional Club Tracking:</strong> Automatically tracks your golf club shaft &amp; clubhead when held, or works hands-only without a club.</li>
-      <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s to auto-start capture.</li>
+      <li><strong>Auto Voice Coaching:</strong> Speaks personalized Gemini feedback immediately after finish.</li>
     `;
   } else if (viewMode === 'dtl') {
     checklistTitle.textContent = '📱 Phone DroidCam (Portrait DTL)';
@@ -659,14 +657,9 @@ function updateViewLayout(): void {
       <li><strong>Optional Club Plane:</strong> Tracks shaft plane angle &amp; clubhead arc when holding a club (not required).</li>
     `;
   } else {
-    checklistTitle.textContent = '⚡ 90° Dual View + Auto AI Coach';
+    checklistTitle.textContent = '⚡ 90° Dual View (Face-On + DTL + Auto Coach)';
     checklistItems.innerHTML = `
-      <li><strong>Address Lock (1.0s):</strong> Stand in front of the Laptop camera with hands below hips for 1s to auto-start recording.</li>
-      <li><strong>Deterministic Fault Ranking:</strong> Ranks all 9 metrics by severity and automatically triggers spoken coaching on completion.</li>
-      <li><strong>Manual Override:</strong> Use <strong>Force Start/Stop</strong> in tight spaces.</li>`;
-    checklistTitle.textContent = '⚡ 90° Dual View (Face-On + DTL)';
-    checklistItems.innerHTML = `
-      <li><strong>Laptop (Front-On):</strong> Tracks full bilateral body rotation, sway, lead arm, and triggers auto-capture.</li>
+      <li><strong>Laptop (Front-On):</strong> Tracks bilateral body rotation, sway, lead arm, 9 metrics &amp; auto-triggers spoken coaching.</li>
       <li><strong>Phone (Portrait DTL):</strong> Simultaneously tracks side-profile <em>Spine Tilt</em>, <em>Knee Flex</em>, <em>Tush Line</em>, and <em>Swing Plane</em>.</li>
       <li><strong>Golf Club (Optional):</strong> Tracks club shaft &amp; clubhead arc automatically if held; works 100% hands-only if swinging without a club.</li>
     `;

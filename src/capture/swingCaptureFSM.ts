@@ -22,15 +22,15 @@ export class SwingCaptureFSM {
   private state: CaptureState = 'IDLE';
   private handedness: Handedness = 'right';
 
-  // Timing constants tuned for responsive pre-swing setup & immediate post-shot completion
-  private readonly ADDRESS_HOLD_MS = 900; // ~0.9s address stillness trigger
-  private readonly FINISH_HOLD_MS = 250; // 0.25s finish settle trigger (completes while in follow-through)
-  private readonly POST_IMPACT_TIMEOUT_MS = 550; // 0.55s post-impact auto-complete (never waits for return to address)
-  private readonly MAX_SETUP_WAIT_MS = 15000; // 15s generous window at setup to adjust stance & swing when ready
-  private readonly MAX_SWING_MOTION_MS = 3200; // Max active swing motion duration
-  private readonly DONE_COOLDOWN_MS = 2400; // Cooldown after shot finishes so lowering arms doesn't re-trigger
-  private readonly STILL_SPEED_THRESHOLD = 0.72; // Forgiving stillness threshold (torso-lengths/sec)
-  private readonly SWING_MOTION_THRESHOLD = 1.35; // Takeaway speed threshold indicating actual swing started
+  // Timing constants tuned for responsive pre-swing setup & immediate follow-through completion
+  private readonly ADDRESS_HOLD_MS = 850; // ~0.85s address stillness trigger
+  private readonly FINISH_HOLD_MS = 120; // 0.12s finish settle trigger (completes immediately in follow-through)
+  private readonly POST_IMPACT_TIMEOUT_MS = 240; // 0.24s post-impact auto-complete (never waits for return to address)
+  private readonly MAX_SETUP_WAIT_MS = 18000; // 18s generous window at setup to adjust stance & swing when ready
+  private readonly MAX_SWING_MOTION_MS = 2200; // Max active swing motion duration
+  private readonly DONE_COOLDOWN_MS = 1500; // Cooldown after shot finishes so lowering arms doesn't re-trigger
+  private readonly STILL_SPEED_THRESHOLD = 0.75; // Forgiving stillness threshold (torso-lengths/sec)
+  private readonly SWING_MOTION_THRESHOLD = 0.95; // Takeaway speed threshold indicating actual swing started
 
   private addressHoldStartMs: number | null = null;
   private addressLockedAtMs: number | null = null;
@@ -45,6 +45,8 @@ export class SwingCaptureFSM {
   private backswingTopReached = false;
   private minHandYSeen = Infinity;
   private maxBackswingDist = 0;
+  private backswingPeakX = 0;
+  private backswingPeakY = 0;
   private addressHandX = 0;
   private addressHandY = 0;
   private peakSpeedSeen = 0;
@@ -54,6 +56,7 @@ export class SwingCaptureFSM {
   private isManualCapture = false;
   private customReadyMessage: string | null = null;
 
+  private canStartAddressCheck: () => boolean = () => true;
   private onAddressLockedCallback: ((frame: SwingFrame) => void) | null = null;
   private onTakeawayStartedCallback: (() => void) | null = null;
   private onSwingCompleteCallback: ((frames: SwingFrame[]) => void) | null = null;
@@ -76,6 +79,13 @@ export class SwingCaptureFSM {
       (this.state === 'RECORDING' && this.swingMotionStarted) ||
       this.state === 'FOLLOW_THROUGH'
     );
+  }
+
+  /**
+   * Registers a gate check so a new shot's address lock waits until post-swing feedback finishes speaking.
+   */
+  setCanStartAddressCheck(fn: () => boolean): void {
+    this.canStartAddressCheck = fn;
   }
 
   /**
@@ -120,6 +130,8 @@ export class SwingCaptureFSM {
       const h = getHandMidpoint2D(this.prevFrame.landmarks);
       this.addressHandX = h.x;
       this.addressHandY = h.y;
+      this.backswingPeakX = h.x;
+      this.backswingPeakY = h.y;
       if (this.onAddressLockedCallback) {
         this.onAddressLockedCallback(this.prevFrame);
       }
@@ -133,7 +145,7 @@ export class SwingCaptureFSM {
   forceStop(): void {
     if (
       (this.state === 'RECORDING' || this.state === 'FOLLOW_THROUGH') &&
-      this.recordedFrames.length >= 8
+      this.recordedFrames.length >= 6
     ) {
       this.completeRecording();
     } else {
@@ -164,11 +176,11 @@ export class SwingCaptureFSM {
    * Feeds a smoothed SwingFrame into the capture state machine.
    */
   update(frame: SwingFrame, isReliable: boolean): CaptureTelemetry {
-    // Auto-reset from DONE -> IDLE after cooldown so lowering arms after follow-through
-    // never re-triggers or delays post-shot coaching feedback.
+    // Auto-reset from DONE -> IDLE after cooldown AND once post-swing speech finishes,
+    // so every subsequent shot gets its pre-swing setup evaluation cleanly.
     if (this.state === 'DONE') {
       const elapsedDone = frame.t - (this.doneTimestampMs ?? frame.t);
-      if (elapsedDone > this.DONE_COOLDOWN_MS) {
+      if (elapsedDone > this.DONE_COOLDOWN_MS && this.canStartAddressCheck()) {
         this.reset();
       } else {
         return {
@@ -185,8 +197,9 @@ export class SwingCaptureFSM {
       }
     }
 
-    // Drop frames where key landmark visibility < 0.5
-    if (!isReliable) {
+    // IMPORTANT: Never abort or freeze an active swing (RECORDING / FOLLOW_THROUGH)
+    // when a landmark briefly loses visibility during high-speed follow-through rotation!
+    if (!isReliable && this.state !== 'RECORDING' && this.state !== 'FOLLOW_THROUGH') {
       if (this.state === 'ADDRESS_HOLD') {
         this.state = 'IDLE';
         this.addressHoldStartMs = null;
@@ -233,12 +246,26 @@ export class SwingCaptureFSM {
 
     // Lead side follow-through check: hands on lead side or above chest/shoulder height
     const leadSign = this.handedness === 'right' ? 1 : -1;
-    const onLeadSide = (hands.x - hips.x) * leadSign >= -0.15 * torso;
-    const wristsAboveChest = hands.y <= shoulders.y + 0.28 * torso;
+    const onLeadSide = (hands.x - hips.x) * leadSign >= -0.18 * torso;
+    const wristsAboveChest = hands.y <= shoulders.y + 0.35 * torso;
     const wristsHighFinish = wristsAboveChest && onLeadSide;
 
     switch (this.state) {
       case 'IDLE': {
+        if (!this.canStartAddressCheck()) {
+          return {
+            state: 'IDLE',
+            holdProgress: 0,
+            recordedFrames: 0,
+            handSpeed: this.smoothedSpeed,
+            wristsBelowHips,
+            wristsHighFinish,
+            isStill,
+            swingMotionStarted: false,
+            message: 'Listening to coach feedback — step into setup for next shot when ready',
+          };
+        }
+
         if (wristsBelowHips && isStill) {
           this.state = 'ADDRESS_HOLD';
           this.addressHoldStartMs = frame.t;
@@ -302,6 +329,8 @@ export class SwingCaptureFSM {
           this.maxBackswingDist = 0;
           this.addressHandX = hands.x;
           this.addressHandY = hands.y;
+          this.backswingPeakX = hands.x;
+          this.backswingPeakY = hands.y;
           this.peakSpeedSeen = 0;
           this.impactTimestampMs = null;
           this.finishStillStartMs = null;
@@ -348,34 +377,38 @@ export class SwingCaptureFSM {
             this.recordedFrames.shift();
           }
 
-          // Gently adapt address hand anchor if golfer adjusts stance while still
-          if (wristsBelowHips && isStill) {
-            this.addressHandX = 0.88 * this.addressHandX + 0.12 * hands.x;
-            this.addressHandY = 0.88 * this.addressHandY + 0.12 * hands.y;
-            this.minHandYSeen = this.addressHandY;
-          }
-
           const handRiseFromAddress = (this.addressHandY - hands.y) / torso;
           const handDistFromAddress =
             Math.hypot(hands.x - this.addressHandX, hands.y - this.addressHandY) / torso;
 
-          // Detect genuine takeaway start (forgives small stance/grip wiggles)
+          // Only gently adapt address hand anchor when hands are very still and close to original address
+          // (prevents a slow takeaway from dragging the address anchor along with the hands)
+          if (wristsBelowHips && this.smoothedSpeed < 0.35 && handDistFromAddress < 0.12) {
+            this.addressHandX = 0.92 * this.addressHandX + 0.08 * hands.x;
+            this.addressHandY = 0.92 * this.addressHandY + 0.08 * hands.y;
+            this.minHandYSeen = this.addressHandY;
+          }
+
+          // Detect genuine takeaway start
           if (
-            (this.smoothedSpeed > this.SWING_MOTION_THRESHOLD && handDistFromAddress > 0.16) ||
-            handRiseFromAddress > 0.22 ||
-            handDistFromAddress > 0.3
+            !wristsBelowHips ||
+            (this.smoothedSpeed > this.SWING_MOTION_THRESHOLD && handDistFromAddress > 0.10) ||
+            handRiseFromAddress > 0.14 ||
+            handDistFromAddress > 0.18
           ) {
             this.swingMotionStarted = true;
             this.swingMotionStartMs = frame.t;
             this.minHandYSeen = hands.y;
             this.maxBackswingDist = handDistFromAddress;
+            this.backswingPeakX = hands.x;
+            this.backswingPeakY = hands.y;
             if (this.onTakeawayStartedCallback) {
               this.onTakeawayStartedCallback();
             }
           } else {
-            // Reset if player walks away or waits > 15s without swinging
+            // Reset if player walks away or waits > 18s without swinging
             const waitDurationMs = frame.t - (this.addressLockedAtMs ?? frame.t);
-            if (waitDurationMs > this.MAX_SETUP_WAIT_MS && ! this.isManualCapture) {
+            if (waitDurationMs > this.MAX_SETUP_WAIT_MS && !this.isManualCapture) {
               this.reset();
             }
             return {
@@ -392,7 +425,7 @@ export class SwingCaptureFSM {
           }
         }
 
-        // ── Phase B: Active Swing Motion (Backswing -> Downswing -> Impact) ──
+        // ── Phase B: Active Swing Motion (Backswing -> Downswing -> Follow-Through) ──
         const swingDurationMs = frame.t - (this.swingMotionStartMs ?? frame.t);
         const handDistFromAddress =
           Math.hypot(hands.x - this.addressHandX, hands.y - this.addressHandY) / torso;
@@ -401,49 +434,69 @@ export class SwingCaptureFSM {
           this.peakSpeedSeen = this.smoothedSpeed;
         }
 
-        // Track backswing apex ONLY before the downswing drop begins,
-        // so high follow-through hands never overwrite `minHandYSeen`.
+        const distFromBackswingPeak =
+          Math.hypot(hands.x - this.backswingPeakX, hands.y - this.backswingPeakY) / torso;
+
+        // Track 2D backswing peak before the downswing starts
         if (!this.backswingTopReached) {
           if (hands.y < this.minHandYSeen) {
             this.minHandYSeen = hands.y;
           }
           if (handDistFromAddress > this.maxBackswingDist) {
             this.maxBackswingDist = handDistFromAddress;
+            this.backswingPeakX = hands.x;
+            this.backswingPeakY = hands.y;
           }
 
-          const roseEnoughForBackswing =
-            (this.addressHandY - this.minHandYSeen) / torso > 0.18 ||
-            this.maxBackswingDist > 0.28;
-          const droppedFromApex = (hands.y - this.minHandYSeen) / torso > 0.09;
+          const movedEnoughForBackswing =
+            (this.addressHandY - this.minHandYSeen) / torso > 0.14 ||
+            this.maxBackswingDist > 0.18;
+          const movedAwayFromApex =
+            (hands.y - this.minHandYSeen) / torso > 0.07 ||
+            distFromBackswingPeak > 0.12;
 
-          if (roseEnoughForBackswing && droppedFromApex) {
+          if (movedEnoughForBackswing && movedAwayFromApex) {
             this.backswingTopReached = true;
           }
         }
 
-        // Detect transition into FOLLOW_THROUGH right as the shot is hit (never waiting for return to address)
+        // Detect transition into FOLLOW_THROUGH immediately as the shot finishes
+        // (NEVER waiting for the golfer to return to the original hitting position)
         const droppedIntoImpactZone =
           this.backswingTopReached &&
-          (hands.y >= this.addressHandY - 0.3 * torso ||
-            (hands.x - hips.x) * leadSign > 0.08 * torso);
+          (hands.y >= this.addressHandY - 0.32 * torso || distFromBackswingPeak > 0.32);
+
+        const crossedToFollowThroughSide =
+          swingDurationMs >= 200 &&
+          this.maxBackswingDist >= 0.16 &&
+          distFromBackswingPeak >= 0.22 &&
+          (hands.x - this.addressHandX) * (this.backswingPeakX - this.addressHandX) < 0;
 
         const whippedToHighFinish =
-          swingDurationMs >= 200 && this.peakSpeedSeen > 1.2 && wristsHighFinish;
+          swingDurationMs >= 180 &&
+          this.maxBackswingDist >= 0.16 &&
+          wristsHighFinish &&
+          distFromBackswingPeak >= 0.18;
 
-        const deceleratedAfterDownswing =
-          swingDurationMs >= 360 &&
-          this.backswingTopReached &&
-          this.peakSpeedSeen > 1.35 &&
-          this.smoothedSpeed < 0.48 * this.peakSpeedSeen;
+        const settledInFollowThrough =
+          swingDurationMs >= 300 &&
+          this.maxBackswingDist >= 0.16 &&
+          handDistFromAddress >= 0.18 &&
+          this.smoothedSpeed < 0.95;
 
-        if (droppedIntoImpactZone || whippedToHighFinish || deceleratedAfterDownswing) {
+        if (
+          droppedIntoImpactZone ||
+          crossedToFollowThroughSide ||
+          whippedToHighFinish ||
+          settledInFollowThrough
+        ) {
           this.state = 'FOLLOW_THROUGH';
           this.impactTimestampMs = frame.t;
-          this.finishStillStartMs = null;
+          this.finishStillStartMs = settledInFollowThrough ? frame.t : null;
         } else if (swingDurationMs > this.MAX_SWING_MOTION_MS) {
-          // Safety completion if active swing exceeds 3.2s
-          if (this.recordedFrames.length >= 12) {
-            this.completeRecording();
+          // Safety completion if active swing exceeds 2.2s
+          if (this.recordedFrames.length >= 10) {
+            this.completeRecording(frame.t);
           } else {
             this.reset();
           }
@@ -466,9 +519,9 @@ export class SwingCaptureFSM {
         this.recordedFrames.push(frame);
         const sinceImpactMs = frame.t - (this.impactTimestampMs ?? frame.t);
 
-        // Condition 1: Follow-through finish settles for 250ms (whether high finish or balanced follow-through)
-        const followThroughSettled = this.smoothedSpeed < 0.92;
-        if (followThroughSettled && sinceImpactMs >= 120) {
+        // Condition 1: Follow-through finish settles for 120ms while in follow-through
+        const followThroughSettled = this.smoothedSpeed < 1.05;
+        if (followThroughSettled && sinceImpactMs >= 60) {
           if (this.finishStillStartMs === null) {
             this.finishStillStartMs = frame.t;
           } else if (frame.t - this.finishStillStartMs >= this.FINISH_HOLD_MS) {
@@ -489,7 +542,7 @@ export class SwingCaptureFSM {
           this.finishStillStartMs = null;
         }
 
-        // Condition 2: Immediate 550ms post-impact completion while player is still in their follow-through
+        // Condition 2: Immediate 240ms post-impact completion while player is still in their follow-through
         if (sinceImpactMs >= this.POST_IMPACT_TIMEOUT_MS) {
           this.completeRecording(frame.t);
           return {

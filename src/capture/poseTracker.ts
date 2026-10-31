@@ -62,7 +62,7 @@ export interface DtlPostureMetrics {
 
 export interface PoseDetectionResult {
   frame: SwingFrame;
-  /** True if key landmarks for the active camera perspective have visibility >= 0.5 */
+  /** True if key landmarks for the active camera perspective have sufficient visibility */
   isReliable: boolean;
   /** Mean visibility across key swing landmarks (0..1) */
   keyVisibility: number;
@@ -239,12 +239,12 @@ export class PoseTracker {
     let isReliable = false;
     let dtlMetrics: DtlPostureMetrics | undefined;
 
+    const pairMaxVis = (lIdx: number, rIdx: number) =>
+      Math.max(smoothed2D[lIdx]?.visibility ?? 0, smoothed2D[rIdx]?.visibility ?? 0);
+
     if (perspective === 'dtl') {
       // In Down-The-Line (side profile), the far side of the body is occluded behind the torso.
-      // Evaluate visibility on the camera-facing side chain: Shoulder, Elbow, Wrist, Hip, Knee.
-      const pairMaxVis = (lIdx: number, rIdx: number) =>
-        Math.max(smoothed2D[lIdx]?.visibility ?? 0, smoothed2D[rIdx]?.visibility ?? 0);
-
+      // Evaluate visibility on the camera-facing side chain: Shoulder, Elbow, Wrist, Hip.
       const dtlVis = [
         pairMaxVis(POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.RIGHT_SHOULDER),
         pairMaxVis(POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.RIGHT_ELBOW),
@@ -252,15 +252,27 @@ export class PoseTracker {
         pairMaxVis(POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.RIGHT_HIP),
       ];
       keyVisibility = dtlVis.reduce((a, b) => a + b, 0) / dtlVis.length;
-      isReliable = keyVisibility >= 0.45 && Math.min(...dtlVis) >= 0.32;
+      isReliable = keyVisibility >= 0.42 && Math.min(...dtlVis) >= 0.28;
       dtlMetrics = this.computeDtlPostureMetrics(smoothed2D);
     } else {
-      // Face-On: evaluate bilateral shoulders, wrists, hips
+      // Face-On: evaluate shoulders, wrists, hips.
+      // Note: In the top of backswing and follow-through finish, the golfer rotates 90°
+      // and wraps their hands around the shoulder, so one wrist or far-side hip/shoulder
+      // can be partially occluded. Using pairMaxVis ensures follow-through frames stay reliable!
       const visValues = KEY_SWING_LANDMARKS.map((idx) => smoothed2D[idx]?.visibility ?? 0);
       keyVisibility =
         visValues.reduce((acc, v) => acc + v, 0) / KEY_SWING_LANDMARKS.length;
-      const minKeyVis = Math.min(...visValues);
-      isReliable = keyVisibility >= 0.5 && minKeyVis >= 0.4;
+      const shoulderVis = pairMaxVis(
+        POSE_LANDMARKS.LEFT_SHOULDER,
+        POSE_LANDMARKS.RIGHT_SHOULDER
+      );
+      const wristVis = pairMaxVis(POSE_LANDMARKS.LEFT_WRIST, POSE_LANDMARKS.RIGHT_WRIST);
+      const hipVis = pairMaxVis(POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.RIGHT_HIP);
+      isReliable =
+        keyVisibility >= 0.42 &&
+        shoulderVis >= 0.4 &&
+        hipVis >= 0.4 &&
+        wristVis >= 0.32;
     }
 
     return {

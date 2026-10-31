@@ -17,7 +17,12 @@ import {
   rankSwingFaults,
 } from './analysis/metricsCalculator';
 import { alignAndScoreSwing } from './analysis/referenceAligner';
-import { evaluateSetupPosture, SetupEvaluation } from './analysis/setupAnalyzer';
+import {
+  checkSetupCorrectionProgress,
+  evaluateSetupPosture,
+  SetupEvaluation,
+  SetupIssue,
+} from './analysis/setupAnalyzer';
 import { drawPoseSkeletonOverlay } from './visuals/canvasOverlay';
 import { SpeechCoach, MOCK_SWING_SCENARIOS } from './coaching/speechCoach';
 import {
@@ -167,8 +172,11 @@ let lastRecording: SwingRecording | null = null;
 let savedReferenceRecording: SwingRecording | null = null;
 let referenceHandPath: Point2D[] = [];
 
-// Pre-Swing Setup Check State (strictly ONE piece of advice per shot, non-picky)
+// Pre-Swing Setup Check State (strictly ONE piece of advice per shot, on EVERY shot, non-picky)
 let setupAdviceGivenForShot = false;
+let setupConfirmedForShot = false;
+let setupLockedAtMs = 0;
+let lastSetupIssue: SetupIssue | null = null;
 let currentSetupEval: SetupEvaluation | null = null;
 let setupReassureTimer: number | null = null;
 
@@ -315,6 +323,9 @@ const speechCoach = new SpeechCoach({
   },
 });
 
+// Gate next shot's address lock until post-swing speech finishes so EVERY shot gets its setup correction
+captureFSM.setCanStartAddressCheck(() => !speechCoach.isBusyWithPostSwing());
+
 /**
  * Checks backend /api/health to show whether GEMINI_API_KEY is configured in .env.
  */
@@ -437,23 +448,25 @@ async function loadSavedReference(): Promise<void> {
 
 /**
  * Pre-Swing Setup Check & Spoken Advice Trigger (`captureFSM.onAddressLocked`):
- * - Fires when the golfer holds address for ~1.0s.
- * - Strictly gives AT MOST ONE piece of setup advice per shot (`setupAdviceGivenForShot`).
+ * - Fires on EVERY shot when the golfer holds address for ~0.85s.
+ * - Strictly gives ONE piece of setup correction advice per shot (`setupEval.spoken`).
  * - Always tells the golfer when to swing ("swing when you're ready").
- * - Never gets picky if the setup isn't fully corrected: after ~2.2s, reassures the golfer
- *   on the HUD that they are good to swing without nagging or blocking capture.
+ * - Monitors live posture at address (`maybeConfirmSetupAdjustment`) and also reassures after ~2.0s
+ *   so it never gets too picky if the setup isn't 100% corrected.
  */
 captureFSM.onAddressLocked((addressFrame: SwingFrame) => {
   clearSetupReassureTimer();
 
-  // If setup advice was already given for this shot (e.g. golfer stepped out & back in),
-  // do NOT give another piece of advice — just give the green light to swing!
+  // If setup advice was already given for this shot (e.g. golfer stepped out & back in before swinging),
+  // do NOT give a second piece of advice — just give the green light to swing!
   if (setupAdviceGivenForShot) {
-    captureFSM.setCustomReadyMessage('✓ Setup ready — Swing when ready!');
+    captureFSM.setCustomReadyMessage('✓ Setup looks good — Swing when ready!');
     return;
   }
 
   setupAdviceGivenForShot = true;
+  setupConfirmedForShot = false;
+  setupLockedAtMs = performance.now();
 
   const evalPerspective = viewMode === 'dtl' ? 'dtl' : 'face-on';
   const dtlForEval = viewMode === 'face-on' ? null : latestDtlMetrics;
@@ -461,42 +474,63 @@ captureFSM.onAddressLocked((addressFrame: SwingFrame) => {
     addressFrame,
     handedness,
     evalPerspective,
-    dtlForEval
+    dtlForEval,
+    sessionSwingCount + 1,
+    lastSetupIssue
   );
   currentSetupEval = setupEval;
+  lastSetupIssue = setupEval.issue;
 
-  const hudMsg = setupEval.isGood
-    ? '✓ Setup looks good — Swing when ready!'
-    : `💡 ${setupEval.headline} — Swing when ready!`;
-  captureFSM.setCustomReadyMessage(hudMsg);
+  captureFSM.setCustomReadyMessage(`💡 ${setupEval.headline} — Swing when ready!`);
 
-  // Show setup check status in the Coach card if post-swing coaching isn't currently speaking
-  if (!speechCoach.isBusyWithPostSwing()) {
-    coachFaultTag.textContent = setupEval.isGood ? 'Setup Ready' : setupEval.headline;
-    coachFaultTag.classList.toggle('none', setupEval.isGood);
-    coachDrillName.textContent = 'Pre-Shot Setup Check';
-    coachQuote.textContent = `"${setupEval.spokenAdvice}"`;
+  // Show setup correction in the Coach card & speak the 1 piece of advice aloud
+  coachFaultTag.textContent = setupEval.headline;
+  coachFaultTag.classList.remove('none');
+  coachDrillName.textContent = `Shot #${sessionSwingCount + 1} Setup Tip`;
+  coachQuote.textContent = `"${setupEval.spoken}"`;
 
-    if (autoCoachEnabled) {
-      speechCoach.speakSetupAdvice(setupEval.spokenAdvice);
-    }
+  if (autoCoachEnabled) {
+    speechCoach.speakSetupAdvice(setupEval.spoken);
   }
 
   // Don't get picky if the golfer doesn't fully correct the setup issue:
-  // after 2.2s at address, update the HUD to a green-light message without nagging again.
-  if (!setupEval.isGood) {
-    setupReassureTimer = window.setTimeout(() => {
-      captureFSM.setCustomReadyMessage('✓ Good to go — Swing whenever you are ready!');
-      if (currentSetupEval) {
-        currentSetupEval = {
-          ...currentSetupEval,
-          isGood: true,
-          headline: 'Ready to Swing',
-        };
-      }
-    }, 2200);
-  }
+  // after 2.0s at address, update the HUD to a green-light message without nagging again.
+  setupReassureTimer = window.setTimeout(() => {
+    setupConfirmedForShot = true;
+    captureFSM.setCustomReadyMessage('✓ Setup looks good — Swing whenever you are ready!');
+  }, 2000);
 });
+
+/**
+ * Checks live at address (before takeaway) if the golfer has made a forgiving (~20%+)
+ * adjustment toward the setup tip target and immediately updates the HUD to green-light.
+ */
+function maybeConfirmSetupAdjustment(frame: SwingFrame, telemetry: CaptureTelemetry): void {
+  if (
+    telemetry.state !== 'RECORDING' ||
+    telemetry.swingMotionStarted ||
+    !currentSetupEval ||
+    setupConfirmedForShot
+  ) {
+    return;
+  }
+
+  const elapsedSinceLock = performance.now() - setupLockedAtMs;
+  if (elapsedSinceLock < 650) return;
+
+  const improved = checkSetupCorrectionProgress(
+    frame,
+    currentSetupEval,
+    handedness,
+    viewMode === 'face-on' ? null : latestDtlMetrics
+  );
+
+  if (improved) {
+    setupConfirmedForShot = true;
+    clearSetupReassureTimer();
+    captureFSM.setCustomReadyMessage('✓ Setup looks good — Swing when ready!');
+  }
+}
 
 /**
  * As soon as takeaway motion begins, cancel any ongoing setup speech so the coach
@@ -522,6 +556,7 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
   clearSetupReassureTimer();
   speechCoach.cancelSetupSpeech();
   setupAdviceGivenForShot = false;
+  setupConfirmedForShot = false;
   currentSetupEval = null;
   captureFSM.setCustomReadyMessage(null);
 
@@ -657,7 +692,7 @@ function updateCaptureUI(
   statHandSpeed.textContent = `${telemetry.handSpeed.toFixed(2)} /s`;
 
   if (telemetry.state === 'RECORDING' && currentSetupEval) {
-    if (currentSetupEval.isGood) {
+    if (setupConfirmedForShot) {
       statAddressCheck.textContent = '✓ Setup Good — Swing!';
       statAddressCheck.style.color = '#34d399';
     } else {
@@ -1070,6 +1105,7 @@ function processLaptopPoseOnFrame(
 
   const { frame, isReliable, keyVisibility, club } = detection;
   const telemetry = captureFSM.update(frame, isReliable);
+  maybeConfirmSetupAdjustment(frame, telemetry);
   updateCaptureUI(telemetry, keyVisibility, club);
 
   if (telemetry.state === 'RECORDING' || telemetry.state === 'FOLLOW_THROUGH') {
@@ -1135,6 +1171,7 @@ function processPhoneDtlPoseOnFrame(
   // If in DTL-only view mode, the phone camera also drives the SwingCaptureFSM
   if (drivesCaptureFSM) {
     const telemetry = captureFSM.update(frame, isReliable);
+    maybeConfirmSetupAdjustment(frame, telemetry);
     fsmState = telemetry.state;
     updateCaptureUI(telemetry, keyVisibility, club);
   } else if (club.detected) {

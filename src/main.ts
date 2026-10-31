@@ -1,5 +1,6 @@
 import './style.css';
 import { CameraManager, CameraDevice } from './capture/cameraManager';
+import { SpeechCoach, MOCK_SWING_SCENARIOS } from './coaching/speechCoach';
 import { Handedness } from './types';
 
 type ViewMode = 'face-on' | 'dtl' | 'dual';
@@ -46,6 +47,22 @@ const statPhoneFps = document.getElementById('stat-phone-fps') as HTMLSpanElemen
 const checklistTitle = document.getElementById('checklist-title') as HTMLHeadingElement;
 const checklistItems = document.getElementById('checklist-items') as HTMLUListElement;
 
+// AI Speech Coach UI Elements
+const coachSourceBadge = document.getElementById('coach-source-badge') as HTMLSpanElement;
+const coachMuteBtn = document.getElementById('coach-mute-btn') as HTMLButtonElement;
+const coachReplayBtn = document.getElementById('coach-replay-btn') as HTMLButtonElement;
+const coachMatchScore = document.getElementById('coach-match-score') as HTMLSpanElement;
+const coachFaultTag = document.getElementById('coach-fault-tag') as HTMLSpanElement;
+const coachDrillName = document.getElementById('coach-drill-name') as HTMLSpanElement;
+const coachStatusDot = document.getElementById('coach-status-dot') as HTMLSpanElement;
+const coachStatusText = document.getElementById('coach-status-text') as HTMLSpanElement;
+const coachLatencyTag = document.getElementById('coach-latency-tag') as HTMLSpanElement;
+const coachQuote = document.getElementById('coach-quote') as HTMLParagraphElement;
+const pttBtn = document.getElementById('ptt-btn') as HTMLButtonElement;
+const sttTranscriptPreview = document.getElementById('stt-transcript-preview') as HTMLDivElement;
+const qaForm = document.getElementById('qa-form') as HTMLFormElement;
+const qaTextInput = document.getElementById('qa-text-input') as HTMLInputElement;
+
 // Dedicated Camera Managers
 const laptopCamManager = new CameraManager(laptopVideo);
 const phoneCamManager = new CameraManager(phoneVideo);
@@ -54,10 +71,122 @@ let viewMode: ViewMode = 'dual';
 let isMirrored = true;
 let showFramingGuide = true;
 let handedness: Handedness = 'right';
-let phoneRotationDeg: 90 | -90 | 0 = 90; // Default 90deg clockwise so 640x480 DroidCam is upright 480x640 portrait
+let phoneRotationDeg: 90 | -90 | 0 = 90;
 let availableDevices: CameraDevice[] = [];
 
 laptopVideo.classList.toggle('mirrored', isMirrored);
+
+// Initialize SpeechCoach
+const speechCoach = new SpeechCoach({
+  onStatusChange: (status) => {
+    coachStatusDot.className = `status-dot ${status}`;
+    pttBtn.classList.toggle('listening', status === 'listening');
+
+    if (status === 'listening') {
+      coachStatusText.textContent = 'Listening to microphone... (release Spacebar to send)';
+      pttBtn.innerHTML = '🔴 Listening... Release <strong>SPACEBAR</strong> to Send';
+    } else if (status === 'thinking') {
+      coachStatusText.textContent = 'Coach is thinking...';
+      pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
+    } else if (status === 'speaking') {
+      coachStatusText.textContent = 'Coach is speaking aloud...';
+      pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
+    } else {
+      coachStatusText.textContent = 'Ready — hold Spacebar to ask a question';
+      pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
+    }
+  },
+  onTranscriptUpdate: (transcript) => {
+    sttTranscriptPreview.textContent = transcript || 'Listening...';
+  },
+  onCoachResponse: (res, payload) => {
+    coachMatchScore.textContent = `${payload.match_score}%`;
+    coachFaultTag.textContent = res.fault === 'none' ? 'Pure Swing' : res.fault.replace(/_/g, ' ');
+    coachFaultTag.classList.toggle('none', res.fault === 'none');
+    coachDrillName.textContent = res.drill;
+    coachQuote.textContent = `"${res.spoken}"`;
+    coachLatencyTag.textContent = `${res.latencyMs}ms`;
+
+    if (res.source === 'gemini') {
+      coachSourceBadge.textContent = '● Gemini 2.5';
+      coachSourceBadge.className = 'coach-badge gemini';
+    } else {
+      coachSourceBadge.textContent = '● Fallback Template';
+      coachSourceBadge.className = 'coach-badge fallback';
+    }
+  },
+  onQAResponse: (question, res) => {
+    sttTranscriptPreview.textContent = `You asked: "${question}"`;
+    coachQuote.textContent = `"${res.spoken}"`;
+    coachLatencyTag.textContent = `${res.latencyMs}ms`;
+
+    if (res.source === 'gemini') {
+      coachSourceBadge.textContent = '● Gemini 2.5';
+      coachSourceBadge.className = 'coach-badge gemini';
+    } else {
+      coachSourceBadge.textContent = '● Fallback Template';
+      coachSourceBadge.className = 'coach-badge fallback';
+    }
+  },
+  onError: (err) => {
+    sttTranscriptPreview.textContent = err;
+  },
+});
+
+/**
+ * Checks backend /api/health to show whether GEMINI_API_KEY is configured in .env.
+ */
+async function checkBackendHealth(): Promise<void> {
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    if (data.geminiConfigured) {
+      coachSourceBadge.textContent = '● Gemini Ready';
+      coachSourceBadge.className = 'coach-badge gemini';
+    } else {
+      coachSourceBadge.textContent = 'Key needed (.env)';
+      coachSourceBadge.className = 'coach-badge fallback';
+    }
+  } catch (_err) {
+    coachSourceBadge.textContent = 'Server Offline';
+    coachSourceBadge.className = 'coach-badge fallback';
+  }
+}
+
+// Wire up simulated swing buttons
+document.querySelectorAll('.btn-sim').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const key = (btn as HTMLButtonElement).dataset.sim as 'bad' | 'improved' | 'pure';
+    const scenario = MOCK_SWING_SCENARIOS[key];
+    if (scenario) {
+      speechCoach.requestSwingCoaching(scenario);
+    }
+  });
+});
+
+// Wire up Push-to-Talk button mouse/touch hold
+pttBtn.addEventListener('mousedown', () => speechCoach.startListening());
+pttBtn.addEventListener('mouseup', () => speechCoach.stopListening());
+pttBtn.addEventListener('mouseleave', () => speechCoach.stopListening());
+
+// Wire up Text Q&A form
+qaForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const q = qaTextInput.value.trim();
+  if (!q) return;
+  qaTextInput.value = '';
+  speechCoach.askCoachQuestion(q);
+});
+
+coachMuteBtn.addEventListener('click', () => {
+  const nextMuted = !speechCoach.getMuted();
+  speechCoach.setMuted(nextMuted);
+  coachMuteBtn.textContent = nextMuted ? '🔇 Muted' : '🔊 TTS';
+});
+
+coachReplayBtn.addEventListener('click', () => {
+  speechCoach.replayLastSpoken();
+});
 
 /**
  * Sizes and rotates the #phone-video inside #phone-container by swapping width & height
@@ -68,7 +197,6 @@ function syncPhonePortraitRotation(): void {
   if (rect.width === 0 || rect.height === 0) return;
 
   if (phoneRotationDeg === 90 || phoneRotationDeg === -90) {
-    // Swap width and height so after a 90-degree rotation it matches the portrait box 1:1
     phoneVideo.style.width = `${rect.height}px`;
     phoneVideo.style.height = `${rect.width}px`;
     phoneVideo.style.transform = `translate(-50%, -50%) rotate(${phoneRotationDeg}deg)`;
@@ -124,9 +252,6 @@ function updateViewLayout(): void {
   });
 }
 
-/**
- * Face-On (Landscape Laptop) Framing Guide.
- */
 function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D): void {
   const rect = canvas.getBoundingClientRect();
   if (canvas.width !== rect.width || canvas.height !== rect.height) {
@@ -144,7 +269,6 @@ function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingCont
 
   context.save();
 
-  // 1. Center spine / stance line
   context.strokeStyle = 'rgba(148, 163, 184, 0.35)';
   context.lineWidth = 1.5;
   context.setLineDash([6, 6]);
@@ -153,7 +277,6 @@ function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingCont
   context.lineTo(cx, h * 0.92);
   context.stroke();
 
-  // 2. Hip-height horizontal line + sway boundaries
   const swayHalfW = w * 0.11;
   context.strokeStyle = 'rgba(16, 185, 129, 0.5)';
   context.beginPath();
@@ -176,7 +299,6 @@ function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingCont
   context.textAlign = 'center';
   context.fillText('HIP SWAY CORRIDOR', cx, hipY - 34);
 
-  // 3. Head Zone Circle
   const headRadius = Math.min(w, h) * 0.055;
   const headY = h * 0.24;
   context.strokeStyle = 'rgba(59, 130, 246, 0.75)';
@@ -188,7 +310,6 @@ function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingCont
   context.fillStyle = 'rgba(147, 197, 253, 0.9)';
   context.fillText('HEAD ZONE (<5cm)', cx, headY - headRadius - 8);
 
-  // 4. Address Hand Trigger Zone (below hips)
   const handBoxW = w * 0.12;
   const handBoxH = h * 0.11;
   const handBoxY = hipY + h * 0.03;
@@ -200,9 +321,6 @@ function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingCont
   context.restore();
 }
 
-/**
- * Down-The-Line (Portrait Phone / DroidCam Behind Swing) Framing Guide.
- */
 function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D): void {
   const rect = canvas.getBoundingClientRect();
   if (canvas.width !== rect.width || canvas.height !== rect.height) {
@@ -216,7 +334,6 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   const w = canvas.width;
   const h = canvas.height;
 
-  // Flip horizontally if left-handed
   const flip = handedness === 'left';
   const xCoord = (normX: number) => (flip ? w * (1 - normX) : w * normX);
 
@@ -232,7 +349,6 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.save();
   context.font = '600 10.5px Inter, system-ui, sans-serif';
 
-  // 1. Target Line on ground (from ball straight up into screen)
   const targetVanishX = xCoord(0.73);
   const targetVanishY = h * 0.24;
   context.strokeStyle = 'rgba(59, 130, 246, 0.65)';
@@ -248,14 +364,12 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.textAlign = flip ? 'left' : 'right';
   context.fillText('⬆ TARGET LINE', targetVanishX + (flip ? 6 : -6), targetVanishY + 12);
 
-  // Ball marker
   context.fillStyle = '#f8fafc';
   context.beginPath();
   context.arc(ballX, ballY, 5, 0, Math.PI * 2);
   context.fill();
   context.fillText('BALL', ballX + (flip ? 10 : -10), ballY + 4);
 
-  // 2. Tush Line (Vertical Hip Depth Wall — detects Early Extension)
   context.strokeStyle = 'rgba(16, 185, 129, 0.85)';
   context.lineWidth = 2;
   context.setLineDash([5, 4]);
@@ -269,7 +383,6 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.textAlign = flip ? 'right' : 'left';
   context.fillText('TUSH LINE', hipX + (flip ? -6 : 6), h * 0.33);
 
-  // 3. Spine Tilt Line (Hip to Shoulder ~40 deg forward bend)
   context.strokeStyle = 'rgba(59, 130, 246, 0.9)';
   context.lineWidth = 3;
   context.beginPath();
@@ -280,7 +393,6 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.fillStyle = '#93c5fd';
   context.fillText('SPINE (~40°)', shoulderX + (flip ? -65 : 6), shoulderY - 6);
 
-  // 4. Swing Plane Corridor (Ball -> Hands -> High Top Apex in Portrait Frame)
   const planeTopX = xCoord(0.18);
   const planeTopY = h * 0.14;
   context.strokeStyle = 'rgba(245, 158, 11, 0.85)';
@@ -290,7 +402,6 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.lineTo(planeTopX, planeTopY);
   context.stroke();
 
-  // Upper parallel bound of swing plane corridor
   context.strokeStyle = 'rgba(245, 158, 11, 0.45)';
   context.setLineDash([5, 5]);
   context.beginPath();
@@ -302,7 +413,6 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.fillStyle = '#fde68a';
   context.fillText('SWING PLANE', planeTopX + (flip ? -70 : 6), planeTopY - 6);
 
-  // 5. Address Hands Box
   context.strokeStyle = 'rgba(245, 158, 11, 0.8)';
   context.strokeRect(handsX - 22, handsY - 18, 44, 36);
   context.textAlign = 'center';
@@ -316,11 +426,6 @@ function redrawOverlays(): void {
   drawDownTheLineGuide(phoneCanvas, phoneCtx);
 }
 
-/**
- * Enumerates cameras and strictly assigns:
- * - laptopCameraSelect -> non-DroidCam integrated laptop webcam
- * - phoneCameraSelect  -> DroidCam / phone webcam
- */
 async function populateCameras(autoStart = true): Promise<void> {
   availableDevices = await CameraManager.listDevices();
   laptopCameraSelect.innerHTML = '';
@@ -369,15 +474,11 @@ async function populateCameras(autoStart = true): Promise<void> {
   }
 }
 
-/**
- * Starts/stops the Laptop stream and Phone (DroidCam) stream based on the active ViewMode.
- */
 async function syncActiveStreams(): Promise<void> {
   const targetFps = Number(fpsSelect.value) || 60;
   const needLaptop = viewMode === 'face-on' || viewMode === 'dual';
   const needPhone = viewMode === 'dtl' || viewMode === 'dual';
 
-  // 1. Laptop Camera (Landscape)
   if (needLaptop) {
     const laptopId = laptopCameraSelect.value || undefined;
     laptopStatusPill.textContent = 'Connecting...';
@@ -397,7 +498,6 @@ async function syncActiveStreams(): Promise<void> {
     laptopCamManager.stop();
   }
 
-  // 2. Phone DroidCam (Portrait, rotated 90° without zoom)
   if (needPhone) {
     const phoneId = phoneCameraSelect.value || undefined;
     phoneStatusPill.textContent = 'Connecting...';
@@ -418,7 +518,6 @@ async function syncActiveStreams(): Promise<void> {
   }
 }
 
-// Per-frame telemetry callbacks
 laptopCamManager.onFrame((_video, _timestampMs, measuredFps) => {
   laptopFpsPill.textContent = `${measuredFps} FPS`;
   laptopFpsPill.className = `hud-pill fps-pill ${measuredFps >= 45 ? 'good' : 'warn'}`;
@@ -441,7 +540,6 @@ phoneCamManager.onFrame((_video, _timestampMs, measuredFps) => {
   drawDownTheLineGuide(phoneCanvas, phoneCtx);
 });
 
-// Event Listeners
 phoneRotateBtn.addEventListener('click', () => {
   if (phoneRotationDeg === 90) phoneRotationDeg = -90;
   else if (phoneRotationDeg === -90) phoneRotationDeg = 0;
@@ -516,3 +614,5 @@ window.addEventListener('resize', () => {
 // Initialize on load
 updateViewLayout();
 populateCameras(true);
+checkBackendHealth();
+setInterval(checkBackendHealth, 5000);

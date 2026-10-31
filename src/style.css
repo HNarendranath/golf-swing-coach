@@ -128,6 +128,22 @@ select:hover,
   font-size: 0.9rem;
 }
 
+.btn-xs {
+  padding: 0.22rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.btn-accent {
+  background: var(--accent);
+  color: #052e16;
+  border-color: var(--accent);
+  font-weight: 700;
+}
+
+.btn-accent:hover {
+  background: var(--accent-hover);
+}
+
 .btn-toggle.active {
   background: rgba(16, 185, 129, 0.18);
   border-color: var(--accent);
@@ -164,7 +180,7 @@ select:hover,
 .workspace {
   flex: 1;
   display: grid;
-  grid-template-columns: 1fr 350px;
+  grid-template-columns: 1fr 375px;
   gap: 1rem;
   padding: 1rem;
   overflow: hidden;
@@ -344,6 +360,7 @@ select:hover,
   flex-direction: column;
   gap: 0.85rem;
   overflow-y: auto;
+  padding-right: 2px;
 }
 
 .card {
@@ -354,9 +371,266 @@ select:hover,
 }
 
 .card h2 {
-  margin: 0 0 0.65rem 0;
-  font-size: 0.9rem;
+  margin: 0;
+  font-size: 0.92rem;
   font-weight: 700;
+}
+
+/* AI Coach Card Styles */
+.coach-card {
+  border-color: rgba(16, 185, 129, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.coach-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.coach-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.coach-badge.gemini {
+  background: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.coach-badge.fallback {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.test-swings-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  background: #0b1120;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem;
+}
+
+.sub-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.test-btn-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4rem;
+}
+
+.btn-sim {
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 0.38rem 0.35rem;
+  text-align: center;
+}
+
+.btn-sim.sim-bad {
+  border-color: rgba(239, 68, 68, 0.5);
+  color: #fca5a5;
+}
+
+.btn-sim.sim-mid {
+  border-color: rgba(245, 158, 11, 0.5);
+  color: #fde68a;
+}
+
+.btn-sim.sim-good {
+  border-color: rgba(16, 185, 129, 0.5);
+  color: #6ee7b7;
+}
+
+.coach-metrics-summary {
+  display: grid;
+  grid-template-columns: 74px 1fr;
+  gap: 0.6rem;
+  align-items: stretch;
+}
+
+.score-pill-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem;
+}
+
+.score-num {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #34d399;
+  font-variant-numeric: tabular-nums;
+}
+
+.fault-drill-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.25rem;
+}
+
+.fault-row,
+.drill-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.fault-tag {
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  text-transform: uppercase;
+}
+
+.fault-tag.none {
+  background: rgba(16, 185, 129, 0.2);
+  color: #6ee7b7;
+}
+
+.drill-name {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #93c5fd;
+  text-align: right;
+}
+
+.coach-speech-box {
+  background: #0b1120;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 0.75rem;
+}
+
+.speech-status-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #64748b;
+}
+
+.status-dot.speaking {
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+.status-dot.thinking {
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+}
+
+.status-dot.listening {
+  background: var(--red);
+  box-shadow: 0 0 10px var(--red);
+}
+
+.latency-tag {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+}
+
+.coach-quote {
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: #f1f5f9;
+  font-weight: 500;
+}
+
+.ptt-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.btn-ptt {
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.16);
+  color: #bfdbfe;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.btn-ptt:hover {
+  background: rgba(59, 130, 246, 0.26);
+}
+
+.btn-ptt.listening {
+  background: rgba(239, 68, 68, 0.28);
+  border-color: var(--red);
+  color: #fecaca;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.35);
+}
+
+.transcript-preview {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  font-style: italic;
+  min-height: 1.1rem;
+}
+
+.qa-input-row {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.qa-input-row input {
+  flex: 1;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.38rem 0.6rem;
+  color: var(--text-main);
+  font-size: 0.78rem;
+}
+
+.qa-input-row input:focus {
+  outline: none;
+  border-color: var(--blue);
 }
 
 .setup-diagram {
@@ -364,7 +638,7 @@ select:hover,
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.4rem;
-  margin-bottom: 0.55rem;
+  margin: 0.55rem 0;
 }
 
 .geometry-svg {
@@ -385,7 +659,7 @@ select:hover,
   border-radius: 8px;
   font-size: 0.78rem;
   line-height: 1.4;
-  margin-bottom: 0.75rem;
+  margin: 0.55rem 0 0.75rem 0;
 }
 
 .banner-info {
@@ -437,7 +711,7 @@ select:hover,
 }
 
 .checklist {
-  margin: 0;
+  margin: 0.55rem 0 0 0;
   padding-left: 1.1rem;
   display: flex;
   flex-direction: column;

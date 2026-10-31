@@ -2,6 +2,9 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type {
   CoachingPayload,
   CoachingResponse,
@@ -12,11 +15,21 @@ import type {
 
 dotenv.config({ override: true });
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const DATA_DIR = path.resolve(__dirname, '../data');
+const SWINGS_DIR = path.join(DATA_DIR, 'swings');
+const REFERENCE_PATH = path.join(DATA_DIR, 'reference.json');
+
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '25mb' }));
+
+async function ensureDirs(): Promise<void> {
+  await fs.mkdir(SWINGS_DIR, { recursive: true });
+}
 
 // Rolling session history (last 5 swings)
 interface SwingSummaryEntry {
@@ -159,7 +172,19 @@ const FALLBACK_TEMPLATES: Record<
   poor_shoulder_turn: [
     {
       spoken: 'Get a fuller shoulder turn by pointing your lead shoulder behind the ball at the top of the backswing.',
-      drill: ' Back-to-Target Turn Cue',
+      drill: 'Back-to-Target Turn Cue',
+    },
+  ],
+  low_x_factor: [
+    {
+      spoken: 'Create more coil by keeping your lower body quiet while turning your shoulders fully against your hips.',
+      drill: 'Resisted Hip-Shoulder Coil Drill',
+    },
+  ],
+  no_weight_shift: [
+    {
+      spoken: 'Shift your pressure into your lead heel before the club starts down so you finish balanced on your front foot.',
+      drill: 'Step-Through Weight Shift Drill',
     },
   ],
   poor_weight_shift: [
@@ -190,6 +215,8 @@ const PRAISE_LABELS: Record<SwingFault, string> = {
   slow_tempo: 'Better pace on the takeaway.',
   early_extension: 'Great job holding your spine angle through impact.',
   poor_shoulder_turn: 'Much fuller shoulder turn at the top.',
+  low_x_factor: 'Great upper-to-lower body coil at the top.',
+  no_weight_shift: 'Great weight transfer onto your lead side.',
   poor_weight_shift: 'Great weight transfer onto your lead side.',
   over_the_top: 'Much better inside path through the ball.',
 };
@@ -257,7 +284,7 @@ function sanitizeSpokenText(text: string): string {
 }
 
 /**
- * Helper to call Gemini with a strict timeout and model fallback (gemini-2.5-flash -> gemini-2.0-flash).
+ * Helper to call Gemini with a strict timeout.
  */
 async function callGeminiWithTimeout<T>(
   work: (genAI: GoogleGenerativeAI) => Promise<T>,
@@ -432,6 +459,117 @@ Reply in 2 to 3 short spoken sentences (plain text, no markdown, no abbreviation
       source: 'fallback',
     };
     res.json(responseBody);
+  }
+});
+
+/**
+ * GET /api/reference — Reads saved reference swing from data/reference.json
+ */
+app.get('/api/reference', async (_req, res) => {
+  try {
+    const raw = await fs.readFile(REFERENCE_PATH, 'utf-8');
+    res.json(JSON.parse(raw));
+  } catch {
+    res.status(404).json({ error: 'No reference swing saved yet' });
+  }
+});
+
+/**
+ * POST /api/reference — Saves a SwingRecording as data/reference.json
+ */
+app.post('/api/reference', async (req, res) => {
+  try {
+    await ensureDirs();
+    const recording = req.body;
+    await fs.writeFile(REFERENCE_PATH, JSON.stringify(recording, null, 2), 'utf-8');
+    res.json({ status: 'saved', path: 'data/reference.json', id: recording.id });
+  } catch (err) {
+    console.error('[server] Failed to save reference swing:', err);
+    res.status(500).json({ error: 'Failed to save reference swing' });
+  }
+});
+
+/**
+ * GET /api/swings — Lists saved user swings from data/swings/
+ */
+app.get('/api/swings', async (_req, res) => {
+  try {
+    await ensureDirs();
+    const files = await fs.readdir(SWINGS_DIR);
+    const jsonFiles = files
+      .filter((f) => f.endsWith('.json'))
+      .sort()
+      .reverse();
+
+    const summaries = await Promise.all(
+      jsonFiles.slice(0, 20).map(async (filename) => {
+        try {
+          const raw = await fs.readFile(path.join(SWINGS_DIR, filename), 'utf-8');
+          const parsed = JSON.parse(raw);
+          return {
+            id: parsed.id || filename.replace(/\.json$/, ''),
+            filename,
+            createdAt: parsed.createdAt,
+            handedness: parsed.handedness,
+            fps: parsed.fps,
+            frameCount: Array.isArray(parsed.frames) ? parsed.frames.length : 0,
+            phases: parsed.phases,
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    res.json({ swings: summaries.filter(Boolean) });
+  } catch (err) {
+    console.error('[server] Failed to list swings:', err);
+    res.status(500).json({ error: 'Failed to list swings' });
+  }
+});
+
+/**
+ * GET /api/swings/:id — Loads a specific saved swing JSON
+ */
+app.get('/api/swings/:id', async (req, res) => {
+  try {
+    const safeId = req.params.id.replace(/[^a-zA-Z0-9_-]/g, '');
+    const filePath = path.join(SWINGS_DIR, `${safeId}.json`);
+    const raw = await fs.readFile(filePath, 'utf-8');
+    res.json(JSON.parse(raw));
+  } catch {
+    res.status(404).json({ error: 'Swing not found' });
+  }
+});
+
+/**
+ * POST /api/swings — Persists a captured SwingRecording to data/swings/swing-<timestamp>.json
+ */
+app.post('/api/swings', async (req, res) => {
+  try {
+    await ensureDirs();
+    const recording = req.body;
+    const timestamp = Date.now();
+    const id = recording.id || `swing-${timestamp}`;
+    const filename = `${id.replace(/[^a-zA-Z0-9_-]/g, '')}.json`;
+    const filePath = path.join(SWINGS_DIR, filename);
+
+    const payload = {
+      ...recording,
+      id,
+      createdAt: recording.createdAt || new Date(timestamp).toISOString(),
+    };
+
+    await fs.writeFile(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+    res.json({
+      status: 'saved',
+      id,
+      filename: `data/swings/${filename}`,
+      frameCount: Array.isArray(payload.frames) ? payload.frames.length : 0,
+    });
+  } catch (err) {
+    console.error('[server] Failed to save swing:', err);
+    res.status(500).json({ error: 'Failed to save swing recording' });
   }
 });
 

@@ -82,6 +82,8 @@ export class SpeechCoach {
   private isMuted = false;
   private lastSpokenText = '';
   private latestSwingPayload: CoachingPayload | null = null;
+  private isSpeakingSetup = false;
+  private isSpeakingPostSwing = false;
 
   // SpeechRecognition (Push-to-talk STT)
   private recognition: any = null;
@@ -255,23 +257,31 @@ export class SpeechCoach {
    */
   async requestSwingCoaching(payload: CoachingPayload): Promise<CoachingResponse> {
     this.latestSwingPayload = payload;
+    this.isSpeakingSetup = false;
+    this.isSpeakingPostSwing = true;
     this.callbacks.onStatusChange?.('thinking');
 
-    const res = await fetch('/api/coach', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    try {
+      const res = await fetch('/api/coach', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-    if (!res.ok) {
-      this.callbacks.onStatusChange?.('idle');
-      throw new Error(`Coach API error: ${res.status}`);
+      if (!res.ok) {
+        this.isSpeakingPostSwing = false;
+        this.callbacks.onStatusChange?.('idle');
+        throw new Error(`Coach API error: ${res.status}`);
+      }
+
+      const data = (await res.json()) as CoachingResponse;
+      this.callbacks.onCoachResponse?.(data, payload);
+      this.speak(data.spoken, true);
+      return data;
+    } catch (err) {
+      this.isSpeakingPostSwing = false;
+      throw err;
     }
-
-    const data = (await res.json()) as CoachingResponse;
-    this.callbacks.onCoachResponse?.(data, payload);
-    this.speak(data.spoken);
-    return data;
   }
 
   /**
@@ -298,16 +308,20 @@ export class SpeechCoach {
 
     const data = (await res.json()) as VoiceQAResponse;
     this.callbacks.onQAResponse?.(cleanQ, data);
-    this.speak(data.spoken);
+    this.speak(data.spoken, false);
     return data;
   }
 
   /**
    * Speaks text aloud via Web Speech API speechSynthesis.
    */
-  speak(text: string): void {
+  speak(text: string, isPostSwing = false): void {
     this.lastSpokenText = text;
+    this.isSpeakingSetup = false;
+    this.isSpeakingPostSwing = isPostSwing;
+
     if (this.isMuted || !this.synth) {
+      this.isSpeakingPostSwing = false;
       this.callbacks.onStatusChange?.('idle');
       return;
     }
@@ -326,22 +340,76 @@ export class SpeechCoach {
       this.callbacks.onStatusChange?.('speaking');
     };
     utterance.onend = () => {
+      this.isSpeakingPostSwing = false;
       this.callbacks.onStatusChange?.('idle');
     };
     utterance.onerror = () => {
+      this.isSpeakingPostSwing = false;
       this.callbacks.onStatusChange?.('idle');
     };
 
     this.synth.speak(utterance);
   }
 
+  /**
+   * Speaks concise pre-swing setup advice & green-light cue immediately at address.
+   * Never interrupts active post-swing coaching, and can be cancelled as soon as takeaway begins.
+   */
+  speakSetupAdvice(text: string): void {
+    if (this.isMuted || !this.synth || this.isSpeakingPostSwing || this.isListening) {
+      return;
+    }
+
+    this.synth.cancel();
+    this.isSpeakingSetup = true;
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    if (this.preferredVoice) {
+      utterance.voice = this.preferredVoice;
+    }
+    // Slightly brisker rate for quick pre-shot setup cues
+    utterance.rate = 1.1;
+    utterance.pitch = 1.0;
+
+    utterance.onstart = () => {
+      this.callbacks.onStatusChange?.('speaking');
+    };
+    utterance.onend = () => {
+      this.isSpeakingSetup = false;
+      this.callbacks.onStatusChange?.('idle');
+    };
+    utterance.onerror = () => {
+      this.isSpeakingSetup = false;
+      this.callbacks.onStatusChange?.('idle');
+    };
+
+    this.synth.speak(utterance);
+  }
+
+  /**
+   * Immediately stops pre-swing setup speech if the golfer starts their takeaway early.
+   */
+  cancelSetupSpeech(): void {
+    if (this.isSpeakingSetup && this.synth) {
+      this.isSpeakingSetup = false;
+      this.synth.cancel();
+      this.callbacks.onStatusChange?.('idle');
+    }
+  }
+
+  isBusyWithPostSwing(): boolean {
+    return this.isSpeakingPostSwing;
+  }
+
   replayLastSpoken(): void {
     if (this.lastSpokenText) {
-      this.speak(this.lastSpokenText);
+      this.speak(this.lastSpokenText, false);
     }
   }
 
   stopSpeaking(): void {
+    this.isSpeakingSetup = false;
+    this.isSpeakingPostSwing = false;
     this.synth?.cancel();
   }
 

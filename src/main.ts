@@ -1,6 +1,6 @@
 import './style.css';
 import { CameraManager, CameraDevice } from './capture/cameraManager';
-import { PoseTracker } from './capture/poseTracker';
+import { PoseTracker, DtlPostureMetrics } from './capture/poseTracker';
 import { SwingCaptureFSM, CaptureTelemetry } from './capture/swingCaptureFSM';
 import {
   computePhaseTempo,
@@ -17,6 +17,7 @@ import {
   rankSwingFaults,
 } from './analysis/metricsCalculator';
 import { alignAndScoreSwing } from './analysis/referenceAligner';
+import { evaluateSetupPosture, SetupEvaluation } from './analysis/setupAnalyzer';
 import { drawPoseSkeletonOverlay } from './visuals/canvasOverlay';
 import { SpeechCoach, MOCK_SWING_SCENARIOS } from './coaching/speechCoach';
 import {
@@ -159,11 +160,17 @@ let liveClubTrail: Point2D[] = [];
 let dtlHandTrail: Point2D[] = [];
 let dtlClubTrail: Point2D[] = [];
 let dtlAddressHipX: number | null = null;
+let latestDtlMetrics: DtlPostureMetrics | null = null;
 let lastCapturedFrames: SwingFrame[] = [];
 let lastCapturedPhases: SwingPhases | null = null;
 let lastRecording: SwingRecording | null = null;
 let savedReferenceRecording: SwingRecording | null = null;
 let referenceHandPath: Point2D[] = [];
+
+// Pre-Swing Setup Check State (strictly ONE piece of advice per shot, non-picky)
+let setupAdviceGivenForShot = false;
+let currentSetupEval: SetupEvaluation | null = null;
+let setupReassureTimer: number | null = null;
 
 // Multi-swing Coaching & Fault Progression State
 let autoCoachEnabled = true;
@@ -172,6 +179,13 @@ let previousFaults: SwingFault[] = [];
 let previousFocusFault: SwingFault | null = null;
 
 laptopVideo.classList.toggle('mirrored', isMirrored);
+
+function clearSetupReassureTimer(): void {
+  if (setupReassureTimer !== null) {
+    window.clearTimeout(setupReassureTimer);
+    setupReassureTimer = null;
+  }
+}
 
 /**
  * Renders the 9 Biomechanical Metrics grid and ranked faults list in the sidebar.
@@ -374,6 +388,10 @@ coachResetBtn.addEventListener('click', async () => {
   sessionSwingCount = 0;
   previousFaults = [];
   previousFocusFault = null;
+  setupAdviceGivenForShot = false;
+  currentSetupEval = null;
+  clearSetupReassureTimer();
+  captureFSM.setCustomReadyMessage(null);
   improvedFaultsBanner.classList.add('hidden');
   await speechCoach.resetSession();
   coachQuote.textContent =
@@ -418,15 +436,95 @@ async function loadSavedReference(): Promise<void> {
 }
 
 /**
- * Callback fired by SwingCaptureFSM when a full swing has been captured.
- * 1. Detects the 5 swing phases & tempo
- * 2. Computes all 9 biomechanical metrics deterministically (`calculateSwingMetrics`)
- * 3. Ranks swing faults by normalized severity (`rankSwingFaults`)
- * 4. Computes reference match score (`alignAndScoreSwing`)
- * 5. Updates the UI & persists the recording to `POST /api/swings`
- * 6. Automatically triggers `speechCoach.requestSwingCoaching(payload)` for hands-free spoken coaching
+ * Pre-Swing Setup Check & Spoken Advice Trigger (`captureFSM.onAddressLocked`):
+ * - Fires when the golfer holds address for ~1.0s.
+ * - Strictly gives AT MOST ONE piece of setup advice per shot (`setupAdviceGivenForShot`).
+ * - Always tells the golfer when to swing ("swing when you're ready").
+ * - Never gets picky if the setup isn't fully corrected: after ~2.2s, reassures the golfer
+ *   on the HUD that they are good to swing without nagging or blocking capture.
+ */
+captureFSM.onAddressLocked((addressFrame: SwingFrame) => {
+  clearSetupReassureTimer();
+
+  // If setup advice was already given for this shot (e.g. golfer stepped out & back in),
+  // do NOT give another piece of advice — just give the green light to swing!
+  if (setupAdviceGivenForShot) {
+    captureFSM.setCustomReadyMessage('✓ Setup ready — Swing when ready!');
+    return;
+  }
+
+  setupAdviceGivenForShot = true;
+
+  const evalPerspective = viewMode === 'dtl' ? 'dtl' : 'face-on';
+  const dtlForEval = viewMode === 'face-on' ? null : latestDtlMetrics;
+  const setupEval = evaluateSetupPosture(
+    addressFrame,
+    handedness,
+    evalPerspective,
+    dtlForEval
+  );
+  currentSetupEval = setupEval;
+
+  const hudMsg = setupEval.isGood
+    ? '✓ Setup looks good — Swing when ready!'
+    : `💡 ${setupEval.headline} — Swing when ready!`;
+  captureFSM.setCustomReadyMessage(hudMsg);
+
+  // Show setup check status in the Coach card if post-swing coaching isn't currently speaking
+  if (!speechCoach.isBusyWithPostSwing()) {
+    coachFaultTag.textContent = setupEval.isGood ? 'Setup Ready' : setupEval.headline;
+    coachFaultTag.classList.toggle('none', setupEval.isGood);
+    coachDrillName.textContent = 'Pre-Shot Setup Check';
+    coachQuote.textContent = `"${setupEval.spokenAdvice}"`;
+
+    if (autoCoachEnabled) {
+      speechCoach.speakSetupAdvice(setupEval.spokenAdvice);
+    }
+  }
+
+  // Don't get picky if the golfer doesn't fully correct the setup issue:
+  // after 2.2s at address, update the HUD to a green-light message without nagging again.
+  if (!setupEval.isGood) {
+    setupReassureTimer = window.setTimeout(() => {
+      captureFSM.setCustomReadyMessage('✓ Good to go — Swing whenever you are ready!');
+      if (currentSetupEval) {
+        currentSetupEval = {
+          ...currentSetupEval,
+          isGood: true,
+          headline: 'Ready to Swing',
+        };
+      }
+    }, 2200);
+  }
+});
+
+/**
+ * As soon as takeaway motion begins, cancel any ongoing setup speech so the coach
+ * never talks over the golfer's swing.
+ */
+captureFSM.onTakeawayStarted(() => {
+  clearSetupReassureTimer();
+  speechCoach.cancelSetupSpeech();
+});
+
+/**
+ * Callback fired by SwingCaptureFSM immediately when the shot finishes in the follow-through
+ * (NOT when the player returns to the hitting position).
+ * 1. Resets pre-shot setup gate for the next shot
+ * 2. Detects the 5 swing phases & tempo
+ * 3. Computes all 9 biomechanical metrics deterministically (`calculateSwingMetrics`)
+ * 4. Ranks swing faults by normalized severity (`rankSwingFaults`)
+ * 5. Computes reference match score (`alignAndScoreSwing`)
+ * 6. Updates the UI & persists the recording to `POST /api/swings`
+ * 7. Immediately triggers `speechCoach.requestSwingCoaching(payload)` for spoken post-shot feedback
  */
 captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
+  clearSetupReassureTimer();
+  speechCoach.cancelSetupSpeech();
+  setupAdviceGivenForShot = false;
+  currentSetupEval = null;
+  captureFSM.setCustomReadyMessage(null);
+
   lastCapturedFrames = frames;
   liveHandTrail = [];
   liveClubTrail = [];
@@ -490,7 +588,7 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
   downloadJsonBtn.disabled = false;
   updateForceButtonUI('DONE');
 
-  // 5. Trigger Automatic Post-Swing Speech Coaching (Non-blocking alongside save)
+  // 5. Trigger Automatic Post-Swing Speech Coaching immediately after shot finishes
   const coachingPayload: CoachingPayload = {
     swing_number: sessionSwingCount,
     match_score: matchScore,
@@ -558,7 +656,15 @@ function updateCaptureUI(
 
   statHandSpeed.textContent = `${telemetry.handSpeed.toFixed(2)} /s`;
 
-  if (telemetry.wristsBelowHips && telemetry.isStill) {
+  if (telemetry.state === 'RECORDING' && currentSetupEval) {
+    if (currentSetupEval.isGood) {
+      statAddressCheck.textContent = '✓ Setup Good — Swing!';
+      statAddressCheck.style.color = '#34d399';
+    } else {
+      statAddressCheck.textContent = `💡 ${currentSetupEval.headline}`;
+      statAddressCheck.style.color = '#fbbf24';
+    }
+  } else if (telemetry.wristsBelowHips && telemetry.isStill) {
     statAddressCheck.textContent = '✓ Ready (Still)';
     statAddressCheck.style.color = '#34d399';
   } else if (telemetry.wristsBelowHips) {
@@ -645,29 +751,22 @@ function updateViewLayout(): void {
   if (viewMode === 'face-on') {
     checklistTitle.textContent = '💻 Laptop Face-On (Landscape)';
     checklistItems.innerHTML = `
-      <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s until the beep locks address.</li>
+      <li><strong>Setup Check:</strong> Hold address for ~1s — coach checks stance &amp; posture (max 1 tip per shot) and tells you when to swing.</li>
       <li><strong>9 Biomechanical Metrics:</strong> Head movement, hip sway &amp; weight shift anchored in cm (torso=50cm); rotations &amp; lead arm angle blended in 3D+2D.</li>
-      <li><strong>Auto Voice Coaching:</strong> Speaks personalized Gemini feedback immediately after finish.</li>
-      <li><strong>Bilateral Skeleton:</strong> Tracks shoulders, hips, lead arm angle, head stability, and lateral sway.</li>
+      <li><strong>Instant Post-Shot Feedback:</strong> Spoken coaching triggers right at follow-through finish.</li>
       <li><strong>Optional Club Tracking:</strong> Automatically tracks your golf club shaft &amp; clubhead when held, or works hands-only without a club.</li>
-      <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s to auto-start capture.</li>
     `;
   } else if (viewMode === 'dtl') {
     checklistTitle.textContent = '📱 Phone DroidCam (Portrait DTL)';
     checklistItems.innerHTML = `
-      <li><strong>Side-Profile Posture Chain:</strong> Tracks <em>Spine Tilt (°)</em>, <em>Knee Flex (°)</em>, <em>Dynamic Tush Line</em>, and <em>Arm/Hand Plane Slot</em>.</li>
+      <li><strong>Side-Profile Setup &amp; Plane:</strong> Checks <em>Spine Tilt (°)</em> &amp; <em>Knee Flex (°)</em> at setup, plus <em>Dynamic Tush Line</em> and <em>Swing Plane</em>.</li>
       <li><strong>Optional Club Plane:</strong> Tracks shaft plane angle &amp; clubhead arc when holding a club (not required).</li>
     `;
   } else {
-    checklistTitle.textContent = '⚡ 90° Dual View + Auto AI Coach';
-    checklistItems.innerHTML = `
-      <li><strong>Address Lock (1.0s):</strong> Stand in front of the Laptop camera with hands below hips for 1s to auto-start recording.</li>
-      <li><strong>Deterministic Fault Ranking:</strong> Ranks all 9 metrics by severity and automatically triggers spoken coaching on completion.</li>
-      <li><strong>Manual Override:</strong> Use <strong>Force Start/Stop</strong> in tight spaces.</li>`;
     checklistTitle.textContent = '⚡ 90° Dual View (Face-On + DTL)';
     checklistItems.innerHTML = `
-      <li><strong>Laptop (Front-On):</strong> Tracks full bilateral body rotation, sway, lead arm, and triggers auto-capture.</li>
-      <li><strong>Phone (Portrait DTL):</strong> Simultaneously tracks side-profile <em>Spine Tilt</em>, <em>Knee Flex</em>, <em>Tush Line</em>, and <em>Swing Plane</em>.</li>
+      <li><strong>Pre-Shot Setup Advice:</strong> Evaluates Face-On + DTL posture at address (1 concise tip max) and tells you when to swing.</li>
+      <li><strong>Instant Post-Shot Feedback:</strong> Completes capture right in the follow-through and speaks Gemini coaching immediately.</li>
       <li><strong>Golf Club (Optional):</strong> Tracks club shaft &amp; clubhead arc automatically if held; works 100% hands-only if swinging without a club.</li>
     `;
   }
@@ -1023,6 +1122,7 @@ function processPhoneDtlPoseOnFrame(
 
   // Update DTL HUD & Sidebar posture readouts
   if (dtlMetrics) {
+    latestDtlMetrics = dtlMetrics;
     const clubLabel = club.detected ? ` | 🏌️ ${club.shaftAngleDeg}°` : '';
     phonePosePill.textContent = `Spine ${dtlMetrics.spineTiltDeg}° | Knee ${dtlMetrics.kneeFlexDeg}°${clubLabel}`;
     statDtlPosture.textContent = `Spine ${dtlMetrics.spineTiltDeg}° / Knee ${dtlMetrics.kneeFlexDeg}°`;
@@ -1229,6 +1329,9 @@ uploadVideoInput.addEventListener('change', async () => {
   try {
     laptopPoseTracker.resetFilter();
     captureFSM.reset();
+    clearSetupReassureTimer();
+    setupAdviceGivenForShot = false;
+    currentSetupEval = null;
     // Unmirror uploaded video files by default so coordinates match natural playback
     isMirrored = false;
     laptopVideo.classList.toggle('mirrored', false);
@@ -1274,6 +1377,9 @@ forceCaptureBtn.addEventListener('click', () => {
 
 clearTrailBtn.addEventListener('click', () => {
   captureFSM.reset();
+  clearSetupReassureTimer();
+  setupAdviceGivenForShot = false;
+  currentSetupEval = null;
   liveHandTrail = [];
   liveClubTrail = [];
   dtlHandTrail = [];

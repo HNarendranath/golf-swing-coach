@@ -192,7 +192,7 @@ export class SwingCaptureFSM {
           wristsHighFinish: false,
           isStill: true,
           swingMotionStarted: false,
-          message: `✓ Shot finished (${this.recordedFrames.length} frames) — Coach feedback active!`,
+          message: `Shot finished (${this.recordedFrames.length} frames) — Coach feedback active!`,
         };
       }
     }
@@ -535,7 +535,7 @@ export class SwingCaptureFSM {
               wristsHighFinish,
               isStill,
               swingMotionStarted: false,
-              message: '✓ Shot finished! Speaking coaching feedback...',
+              message: 'Shot finished! Speaking coaching feedback...',
             };
           }
         } else if (!followThroughSettled) {
@@ -554,7 +554,7 @@ export class SwingCaptureFSM {
             wristsHighFinish,
             isStill,
             swingMotionStarted: false,
-            message: '✓ Shot finished! Speaking coaching feedback...',
+            message: 'Shot finished! Speaking coaching feedback...',
           };
         }
 

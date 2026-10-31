@@ -102,6 +102,7 @@
               <button id="upload-video-btn" class="btn" title="Load a recorded swing video file for testing">
                 📂 Video
               </button>
+              <button id="toggle-3d-stage-btn" class="btn btn-toggle" title="Expand 3D Swing Replay into Main Stage">🧊 3D Studio</button>
               <input type="file" id="upload-video-input" accept="video/*" class="hidden" />
             </div>
           </div>
@@ -250,6 +251,9 @@
               </form>
             </div>
           </div>
+
+          <!-- Interactive Three.js 3D Swing Replay Card (also expands to full stage) -->
+          <div class="card replay3d-card" id="replay-3d-card"></div>
 
           <!-- Card 2: Swing Capture State Machine & Override Controls -->
           <div class="card">

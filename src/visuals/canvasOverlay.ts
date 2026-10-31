@@ -1,9 +1,12 @@
 import {
   ClubState,
+  Handedness,
   Landmark,
   POSE_CONNECTIONS,
   POSE_LANDMARKS,
+  SwingFault,
   SwingFrame,
+  SwingMetrics,
   SwingPhases,
 } from '../types';
 import { getHandMidpoint2D, Point2D } from '../analysis/phaseDetector';
@@ -12,6 +15,8 @@ import { DtlPostureMetrics } from '../capture/poseTracker';
 export interface SkeletonDrawOptions {
   /** Camera perspective: 'face-on' (bilateral skeleton) or 'dtl' (side-profile posture & plane chain) */
   perspective?: 'face-on' | 'dtl';
+  /** Golfer handedness ('right' default or 'left') for lead-side joint identification */
+  handedness?: Handedness;
   /** Mirror X coordinates (1 - x) to match a horizontally flipped <video class="mirrored"> */
   mirrored?: boolean;
   /** Whether key landmarks passed the visibility gate */
@@ -30,13 +35,18 @@ export interface SkeletonDrawOptions {
   capturedFrames?: SwingFrame[];
   /** Detected phases for the last captured swing */
   capturedPhases?: SwingPhases | null;
-  /** Optional reference hand path (green ghost path) */
+  /** Optional custom reference hand path (green ghost path) */
   referenceHandPath?: Point2D[];
+  /** Ranked biomechanical faults from the latest swing for 2D joint color-coding (Green -> Amber -> Red) */
+  activeFaults?: SwingFault[];
+  /** Latest computed 9 biomechanical metrics for on-body 2D callout badges */
+  latestMetrics?: SwingMetrics | null;
 }
 
 /**
- * Renders the 2D MediaPipe skeleton (or DTL side-profile posture chain), hand midpoint,
- * live hand trail, optional golf club shaft + clubhead trail, and captured phase markers.
+ * Renders the 2D MediaPipe skeleton (or DTL side-profile posture chain), fault-colored joints,
+ * body-anchored Pro Reference Ghost Hand Path (Green) vs User Hand Path (Red), live hand/club trails,
+ * captured Top-of-Swing ghost pose, and on-body biomechanical metric callouts.
  */
 export function drawPoseSkeletonOverlay(
   canvas: HTMLCanvasElement,
@@ -50,18 +60,35 @@ export function drawPoseSkeletonOverlay(
 
   const mirrored = Boolean(options.mirrored);
   const perspective = options.perspective ?? 'face-on';
+  const handedness = options.handedness ?? 'right';
+  const activeFaults = options.activeFaults ?? [];
   const toScreenX = (normX: number) => (mirrored ? (1 - normX) * w : normX * w);
   const toScreenY = (normY: number) => normY * h;
 
   ctx.save();
 
-  // 1. Optional Reference Ghost Hand Path (Green)
-  if (options.referenceHandPath && options.referenceHandPath.length > 1) {
-    ctx.strokeStyle = 'rgba(16, 185, 129, 0.78)';
+  // Determine anchor torso (from captured Address frame or live landmarks) for Reference Ghost alignment
+  const anchorLandmarks =
+    options.capturedFrames &&
+    options.capturedFrames.length > 0 &&
+    options.capturedPhases
+      ? options.capturedFrames[options.capturedPhases.address]?.landmarks ?? landmarks
+      : landmarks;
+
+  // 1. Reference Ghost Hand Path (Green Dashed) — uses saved reference path or body-anchored Pro Reference arc
+  const refPathToDraw =
+    options.referenceHandPath && options.referenceHandPath.length > 1
+      ? options.referenceHandPath
+      : perspective === 'face-on' && anchorLandmarks
+        ? buildBodyAnchoredProReferencePath(anchorLandmarks, handedness)
+        : [];
+
+  if (refPathToDraw.length > 1) {
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.82)';
     ctx.lineWidth = 3;
-    ctx.setLineDash([6, 4]);
+    ctx.setLineDash([7, 5]);
     ctx.beginPath();
-    options.referenceHandPath.forEach((pt, idx) => {
+    refPathToDraw.forEach((pt, idx) => {
       const sx = toScreenX(pt.x);
       const sy = toScreenY(pt.y);
       if (idx === 0) ctx.moveTo(sx, sy);
@@ -69,13 +96,42 @@ export function drawPoseSkeletonOverlay(
     });
     ctx.stroke();
     ctx.setLineDash([]);
+
+    // Label the apex of the Pro Reference Ghost Path
+    let refTopPt = refPathToDraw[0];
+    for (const pt of refPathToDraw) {
+      if (pt.y < refTopPt.y) refTopPt = pt;
+    }
+    drawCalloutLabel(
+      ctx,
+      'PRO REF ARC',
+      toScreenX(refTopPt.x) - 36,
+      toScreenY(refTopPt.y) - 8,
+      '#10b981'
+    );
   }
 
-  // 2. Last Captured Swing Hand Path + Phase Markers (Address, Takeaway, Top, Impact, Finish)
+  // 2. Last Captured Swing: Ghost "Top of Swing" Pose + User Hand Path (Red) + Phase Markers
   if (options.capturedFrames && options.capturedFrames.length > 1) {
+    // 2a. Subtle Ghost Skeleton at TOP OF SWING so user can inspect their Top posture on 2D video
+    if (perspective === 'face-on' && options.capturedPhases) {
+      const topFrame = options.capturedFrames[options.capturedPhases.top];
+      if (topFrame?.landmarks) {
+        drawCapturedPhaseGhostSkeleton(
+          ctx,
+          topFrame.landmarks,
+          handedness,
+          activeFaults,
+          toScreenX,
+          toScreenY
+        );
+      }
+    }
+
+    // 2b. User Captured Hand Path (Red/Coral)
     const handPts = options.capturedFrames.map((f) => getHandMidpoint2D(f.landmarks));
-    ctx.strokeStyle = 'rgba(239, 68, 68, 0.75)';
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.85)';
+    ctx.lineWidth = 3;
     ctx.beginPath();
     handPts.forEach((pt, idx) => {
       const sx = toScreenX(pt.x);
@@ -85,6 +141,7 @@ export function drawPoseSkeletonOverlay(
     });
     ctx.stroke();
 
+    // 2c. Phase Badges (ADDR, TAKE, TOP, IMP, FIN)
     if (options.capturedPhases) {
       const p = options.capturedPhases;
       const phaseBadges: Array<{ label: string; idx: number; color: string }> = [
@@ -104,7 +161,7 @@ export function drawPoseSkeletonOverlay(
 
         ctx.fillStyle = badge.color;
         ctx.beginPath();
-        ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+        ctx.arc(sx, sy, 5.5, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.strokeStyle = '#090d16';
@@ -117,7 +174,7 @@ export function drawPoseSkeletonOverlay(
     }
   }
 
-  // 3. Live Clubhead Trail (Magenta/Cyan outer arc when club is tracked)
+  // 3. Live Clubhead Trail (Magenta outer arc when club is tracked)
   if (options.liveClubTrail && options.liveClubTrail.length > 1) {
     ctx.strokeStyle = 'rgba(232, 121, 249, 0.85)';
     ctx.lineWidth = 2.5;
@@ -154,11 +211,29 @@ export function drawPoseSkeletonOverlay(
 
   // 5. Render perspective-specific body tracking:
   //    - 'dtl': Side-profile Spine Tilt, Hip Tush-Line Depth, Knee Flex, and Arm/Hand Slot
-  //    - 'face-on': Full bilateral 33-landmark skeleton
+  //    - 'face-on': Full bilateral 33-landmark skeleton with Fault Color-Coding & Metric Badges
   if (perspective === 'dtl' && options.dtlMetrics) {
-    drawDtlSideProfileChain(ctx, w, h, landmarks, options.dtlMetrics, options.addressHipX, toScreenX, toScreenY);
+    drawDtlSideProfileChain(
+      ctx,
+      w,
+      h,
+      landmarks,
+      options.dtlMetrics,
+      options.addressHipX,
+      toScreenX,
+      toScreenY
+    );
   } else {
-    drawFaceOnBilateralSkeleton(ctx, landmarks, options.isReliable !== false, toScreenX, toScreenY);
+    drawFaceOnBilateralSkeleton(
+      ctx,
+      landmarks,
+      options.isReliable !== false,
+      handedness,
+      activeFaults,
+      options.latestMetrics ?? null,
+      toScreenX,
+      toScreenY
+    );
   }
 
   // 6. Highlight Hand / Grip Midpoint
@@ -183,37 +258,201 @@ export function drawPoseSkeletonOverlay(
     drawTrackedGolfClub(ctx, options.club, toScreenX, toScreenY);
   }
 
+  // 8. 2D Path & Fault Legend Pill (bottom-right above HUD bar when paths/faults are active)
+  if (perspective === 'face-on' && (refPathToDraw.length > 1 || activeFaults.length > 0)) {
+    draw2DOverlayLegend(ctx, w, h, activeFaults);
+  }
+
   ctx.restore();
 }
 
 /**
- * Draws the standard bilateral 33-landmark skeleton for the Face-On (Laptop) view.
+ * Computes a body-anchored Pro Reference Hand Path (normalized 0..1) scaled to the golfer's
+ * live torso length and centered on their hip/shoulder axis so the green ghost arc always
+ * lines up with where the golfer is standing in the frame.
  */
-function drawFaceOnBilateralSkeleton(
-  ctx: CanvasRenderingContext2D,
+function buildBodyAnchoredProReferencePath(
   landmarks: Landmark[],
-  reliable: boolean,
+  handedness: Handedness
+): Point2D[] {
+  const ls = landmarks[POSE_LANDMARKS.LEFT_SHOULDER];
+  const rs = landmarks[POSE_LANDMARKS.RIGHT_SHOULDER];
+  const lh = landmarks[POSE_LANDMARKS.LEFT_HIP];
+  const rh = landmarks[POSE_LANDMARKS.RIGHT_HIP];
+  if (!ls || !rs || !lh || !rh) return [];
+
+  const shMidX = (ls.x + rs.x) * 0.5;
+  const shMidY = (ls.y + rs.y) * 0.5;
+  const hipMidX = (lh.x + rh.x) * 0.5;
+  const hipMidY = (lh.y + rh.y) * 0.5;
+
+  const torsoLen = Math.hypot(shMidX - hipMidX, shMidY - hipMidY);
+  if (torsoLen < 0.05) return [];
+
+  // In raw MediaPipe 2D coordinates, right-handed backswing moves toward Golfer's Right (smaller X)
+  const backswingDirX = handedness === 'right' ? -1 : 1;
+  const radius = torsoLen * 0.88;
+  const pts: Point2D[] = [];
+
+  // 1. Address -> Top of Backswing arc (20 points)
+  for (let i = 0; i <= 20; i++) {
+    const t = i / 20;
+    const angle = t * (Math.PI * 0.78); // 0 (bottom) to ~140 deg (top)
+    const x = shMidX + backswingDirX * Math.sin(angle) * radius;
+    const y = shMidY + Math.cos(angle) * radius * 0.95;
+    pts.push({ x, y });
+  }
+
+  // 2. Downswing -> Impact -> Follow-Through Finish arc (20 points)
+  const innerRadius = torsoLen * 0.82;
+  for (let i = 1; i <= 20; i++) {
+    const t = i / 20;
+    const angle = (1 - t) * (Math.PI * 0.78) - t * (Math.PI * 0.82);
+    const x = shMidX + backswingDirX * Math.sin(angle) * innerRadius;
+    const y = shMidY + Math.cos(angle) * innerRadius * 0.92;
+    pts.push({ x, y });
+  }
+
+  return pts;
+}
+
+/**
+ * Returns the fault highlight color (`#ef4444` Red for #1 fault, `#f59e0b` Amber for #2 fault, or null)
+ * for a given MediaPipe joint index based on `activeFaults`.
+ */
+function getJointFaultColor2D(
+  jointIdx: number,
+  handedness: Handedness,
+  activeFaults: SwingFault[]
+): string | null {
+  if (activeFaults.length === 0) return null;
+
+  const leadElbow =
+    handedness === 'right' ? POSE_LANDMARKS.LEFT_ELBOW : POSE_LANDMARKS.RIGHT_ELBOW;
+  const leadWrist =
+    handedness === 'right' ? POSE_LANDMARKS.LEFT_WRIST : POSE_LANDMARKS.RIGHT_WRIST;
+  const leadShoulder =
+    handedness === 'right' ? POSE_LANDMARKS.LEFT_SHOULDER : POSE_LANDMARKS.RIGHT_SHOULDER;
+
+  for (let rank = 0; rank < Math.min(2, activeFaults.length); rank++) {
+    const fault = activeFaults[rank];
+    const color = rank === 0 ? '#ef4444' : '#f59e0b';
+
+    if (
+      (fault === 'bent_lead_arm' || fault === 'over_the_top') &&
+      (jointIdx === leadElbow || jointIdx === leadWrist || jointIdx === leadShoulder)
+    ) {
+      return color;
+    }
+    if (fault === 'head_movement' && jointIdx === POSE_LANDMARKS.NOSE) {
+      return color;
+    }
+    if (
+      (fault === 'hip_sway' || fault === 'no_weight_shift') &&
+      (jointIdx === POSE_LANDMARKS.LEFT_HIP || jointIdx === POSE_LANDMARKS.RIGHT_HIP)
+    ) {
+      return color;
+    }
+    if (
+      (fault === 'poor_shoulder_turn' ||
+        fault === 'low_x_factor' ||
+        fault === 'early_extension') &&
+      (jointIdx === POSE_LANDMARKS.LEFT_SHOULDER || jointIdx === POSE_LANDMARKS.RIGHT_SHOULDER)
+    ) {
+      return color;
+    }
+  }
+  return null;
+}
+
+/**
+ * Draws a subtle ghost silhouette of the user's captured Top-of-Swing upper body so they can
+ * inspect lead-arm extension and shoulder turn right on the 2D canvas.
+ */
+function drawCapturedPhaseGhostSkeleton(
+  ctx: CanvasRenderingContext2D,
+  topLandmarks: Landmark[],
+  handedness: Handedness,
+  activeFaults: SwingFault[],
   toScreenX: (x: number) => number,
   toScreenY: (y: number) => number
 ): void {
-  const boneStroke = reliable
-    ? 'rgba(16, 185, 129, 0.88)'
-    : 'rgba(245, 158, 11, 0.55)';
+  const upperConnections: Array<[number, number]> = [
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.RIGHT_SHOULDER],
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_HIP],
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_HIP],
+    [POSE_LANDMARKS.LEFT_HIP, POSE_LANDMARKS.RIGHT_HIP],
+    [POSE_LANDMARKS.LEFT_SHOULDER, POSE_LANDMARKS.LEFT_ELBOW],
+    [POSE_LANDMARKS.LEFT_ELBOW, POSE_LANDMARKS.LEFT_WRIST],
+    [POSE_LANDMARKS.RIGHT_SHOULDER, POSE_LANDMARKS.RIGHT_ELBOW],
+    [POSE_LANDMARKS.RIGHT_ELBOW, POSE_LANDMARKS.RIGHT_WRIST],
+  ];
 
-  ctx.strokeStyle = boneStroke;
-  ctx.lineWidth = 2.5;
-  for (const [i, j] of POSE_CONNECTIONS) {
-    const a = landmarks[i];
-    const b = landmarks[j];
+  ctx.save();
+  ctx.lineWidth = 2;
+  ctx.setLineDash([4, 4]);
+
+  for (const [i, j] of upperConnections) {
+    const a = topLandmarks[i];
+    const b = topLandmarks[j];
     if (!a || !b) continue;
-    if ((a.visibility ?? 1) < 0.35 || (b.visibility ?? 1) < 0.35) continue;
-
+    const faultCol =
+      getJointFaultColor2D(i, handedness, activeFaults) ||
+      getJointFaultColor2D(j, handedness, activeFaults);
+    ctx.strokeStyle = faultCol ? 'rgba(239, 68, 68, 0.55)' : 'rgba(245, 158, 11, 0.38)';
     ctx.beginPath();
     ctx.moveTo(toScreenX(a.x), toScreenY(a.y));
     ctx.lineTo(toScreenX(b.x), toScreenY(b.y));
     ctx.stroke();
   }
 
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+/**
+ * Draws the standard bilateral 33-landmark skeleton for the Face-On (Laptop) view,
+ * with per-joint biomechanical fault color-coding (Green -> Amber -> Red) and live metric callouts.
+ */
+function drawFaceOnBilateralSkeleton(
+  ctx: CanvasRenderingContext2D,
+  landmarks: Landmark[],
+  reliable: boolean,
+  handedness: Handedness,
+  activeFaults: SwingFault[],
+  metrics: SwingMetrics | null,
+  toScreenX: (x: number) => number,
+  toScreenY: (y: number) => number
+): void {
+  const defaultBoneStroke = reliable
+    ? 'rgba(16, 185, 129, 0.88)'
+    : 'rgba(245, 158, 11, 0.55)';
+
+  // 1. Bones (colored Red/Amber if connected to an active fault joint)
+  for (const [i, j] of POSE_CONNECTIONS) {
+    const a = landmarks[i];
+    const b = landmarks[j];
+    if (!a || !b) continue;
+    if ((a.visibility ?? 1) < 0.35 || (b.visibility ?? 1) < 0.35) continue;
+
+    const faultA = getJointFaultColor2D(i, handedness, activeFaults);
+    const faultB = getJointFaultColor2D(j, handedness, activeFaults);
+    const faultStroke =
+      faultA === '#ef4444' || faultB === '#ef4444'
+        ? 'rgba(239, 68, 68, 0.92)'
+        : faultA || faultB
+          ? 'rgba(245, 158, 11, 0.92)'
+          : defaultBoneStroke;
+
+    ctx.strokeStyle = faultStroke;
+    ctx.lineWidth = faultA || faultB ? 3.5 : 2.5;
+    ctx.beginPath();
+    ctx.moveTo(toScreenX(a.x), toScreenY(a.y));
+    ctx.lineTo(toScreenX(b.x), toScreenY(b.y));
+    ctx.stroke();
+  }
+
+  // 2. Joints (with glowing fault ring on problem joints)
   for (let i = 0; i < landmarks.length; i++) {
     const lm = landmarks[i];
     if (!lm || (lm.visibility ?? 1) < 0.35) continue;
@@ -231,11 +470,95 @@ function drawFaceOnBilateralSkeleton(
       i === POSE_LANDMARKS.RIGHT_HIP ||
       i === POSE_LANDMARKS.NOSE;
 
+    const faultColor = getJointFaultColor2D(i, handedness, activeFaults);
+
+    if (faultColor) {
+      // Outer warning pulse halo on fault joint
+      ctx.beginPath();
+      ctx.arc(sx, sy, 9.5, 0, Math.PI * 2);
+      ctx.fillStyle =
+        faultColor === '#ef4444' ? 'rgba(239, 68, 68, 0.28)' : 'rgba(245, 158, 11, 0.28)';
+      ctx.fill();
+    }
+
     ctx.beginPath();
-    ctx.arc(sx, sy, isKeyJoint ? 4.5 : 2.5, 0, Math.PI * 2);
-    ctx.fillStyle = isKeyJoint ? '#38bdf8' : 'rgba(248, 250, 252, 0.75)';
+    ctx.arc(sx, sy, faultColor ? 6 : isKeyJoint ? 4.5 : 2.5, 0, Math.PI * 2);
+    ctx.fillStyle = faultColor || (isKeyJoint ? '#38bdf8' : 'rgba(248, 250, 252, 0.75)');
     ctx.fill();
+    if (faultColor || isKeyJoint) {
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = '#090d16';
+      ctx.stroke();
+    }
   }
+
+  // 3. On-Body 2D Biomechanical Metric Callout Badges (when metrics are available)
+  if (metrics) {
+    const nose = landmarks[POSE_LANDMARKS.NOSE];
+    const leadElbowIdx =
+      handedness === 'right' ? POSE_LANDMARKS.LEFT_ELBOW : POSE_LANDMARKS.RIGHT_ELBOW;
+    const leadElbow = landmarks[leadElbowIdx];
+    const lHip = landmarks[POSE_LANDMARKS.LEFT_HIP];
+    const rHip = landmarks[POSE_LANDMARKS.RIGHT_HIP];
+
+    if (nose && (nose.visibility ?? 1) >= 0.35) {
+      const headBad = activeFaults.includes('head_movement');
+      drawCalloutLabel(
+        ctx,
+        `HEAD Δ ${metrics.head_movement_cm}cm`,
+        toScreenX(nose.x) + 12,
+        toScreenY(nose.y) - 6,
+        headBad ? '#ef4444' : '#34d399'
+      );
+    }
+
+    if (leadElbow && (leadElbow.visibility ?? 1) >= 0.35) {
+      const armBad = activeFaults.includes('bent_lead_arm');
+      drawCalloutLabel(
+        ctx,
+        `LEAD ARM ${metrics.lead_arm_deg}°`,
+        toScreenX(leadElbow.x) + 10,
+        toScreenY(leadElbow.y) + 4,
+        armBad ? '#ef4444' : '#38bdf8'
+      );
+    }
+
+    if (lHip && rHip) {
+      const hipMidX = toScreenX((lHip.x + rHip.x) * 0.5);
+      const hipMidY = toScreenY((lHip.y + rHip.y) * 0.5);
+      const hipBad =
+        activeFaults.includes('hip_sway') || activeFaults.includes('no_weight_shift');
+      drawCalloutLabel(
+        ctx,
+        `SWAY ${metrics.hip_sway_cm}cm | X-FAC ${metrics.x_factor_deg}°`,
+        hipMidX - 58,
+        hipMidY + 24,
+        hipBad ? '#f59e0b' : '#34d399'
+      );
+    }
+  }
+}
+
+/**
+ * Draws a compact legend badge in the bottom-right corner of the 2D Face-On canvas.
+ */
+function draw2DOverlayLegend(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  activeFaults: SwingFault[]
+): void {
+  const primaryFault = activeFaults[0]
+    ? `⚠️ #1: ${activeFaults[0].replace(/_/g, ' ').toUpperCase()}`
+    : '✓ ON-PLANE';
+  const text = `🟢 Pro Ref Arc   🔴 Your Swing   ${primaryFault}`;
+  drawCalloutLabel(
+    ctx,
+    text,
+    Math.max(12, w - ctx.measureText(text).width - 28),
+    h - 54,
+    activeFaults.length > 0 ? '#f59e0b' : '#10b981'
+  );
 }
 
 /**
@@ -361,6 +684,15 @@ function drawDtlSideProfileChain(
     kneeY + 4,
     '#34d399'
   );
+  if (isEarlyExtending) {
+    drawCalloutLabel(
+      ctx,
+      '⚠️ EARLY EXTENSION',
+      hipX + 12,
+      hipY - 12,
+      '#ef4444'
+    );
+  }
 
   ctx.restore();
 }

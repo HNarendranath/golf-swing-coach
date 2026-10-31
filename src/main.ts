@@ -18,6 +18,7 @@ import {
 } from './analysis/metricsCalculator';
 import { alignAndScoreSwing } from './analysis/referenceAligner';
 import { drawPoseSkeletonOverlay } from './visuals/canvasOverlay';
+import { Replay3DViewer } from './visuals/replay3D';
 import { SpeechCoach, MOCK_SWING_SCENARIOS } from './coaching/speechCoach';
 import {
   CoachingPayload,
@@ -58,6 +59,8 @@ const skeletonBtn = document.getElementById('skeleton-btn') as HTMLButtonElement
 const clubTrackBtn = document.getElementById('club-track-btn') as HTMLButtonElement;
 const mirrorBtn = document.getElementById('mirror-btn') as HTMLButtonElement;
 const guideBtn = document.getElementById('guide-btn') as HTMLButtonElement;
+const toggle3dStageBtn = document.getElementById('toggle-3d-stage-btn') as HTMLButtonElement;
+const replay3dCard = document.getElementById('replay-3d-card') as HTMLDivElement;
 const uploadVideoBtn = document.getElementById('upload-video-btn') as HTMLButtonElement;
 const uploadVideoInput = document.getElementById('upload-video-input') as HTMLInputElement;
 const handednessToggle = document.getElementById('handedness-toggle') as HTMLDivElement;
@@ -142,6 +145,12 @@ const phoneCamManager = new CameraManager(phoneVideo);
 const laptopPoseTracker = new PoseTracker(1.2, 0.08, 1.0);
 const phonePoseTracker = new PoseTracker(1.2, 0.08, 1.0);
 const captureFSM = new SwingCaptureFSM('right');
+const replay3D = new Replay3DViewer(replay3dCard, {
+  onExpandChange: (expanded) => {
+    toggle3dStageBtn.classList.toggle('active', expanded);
+    toggle3dStageBtn.textContent = expanded ? '🧊 Exit 3D' : '🧊 3D Studio';
+  },
+});
 
 let viewMode: ViewMode = 'dual';
 let isMirrored = true;
@@ -170,6 +179,7 @@ let autoCoachEnabled = true;
 let sessionSwingCount = 0;
 let previousFaults: SwingFault[] = [];
 let previousFocusFault: SwingFault | null = null;
+let lastComputedMetrics: SwingMetrics | null = null;
 
 laptopVideo.classList.toggle('mirrored', isMirrored);
 
@@ -335,6 +345,9 @@ document.querySelectorAll('.btn-sim').forEach((btn) => {
       statBackswingMs.textContent = `${scenario.metrics.backswing_ms} ms`;
       statDownswingMs.textContent = `${scenario.metrics.downswing_ms} ms`;
       tempoBadge.textContent = `Tempo: ${scenario.metrics.tempo_ratio} : 1`;
+      previousFaults = scenario.faults_ranked;
+      lastComputedMetrics = scenario.metrics;
+      replay3D.loadSimulatedScenario(key, scenario.faults_ranked, handedness);
       speechCoach.requestSwingCoaching(scenario);
     }
   });
@@ -374,6 +387,7 @@ coachResetBtn.addEventListener('click', async () => {
   sessionSwingCount = 0;
   previousFaults = [];
   previousFocusFault = null;
+  lastComputedMetrics = null;
   improvedFaultsBanner.classList.add('hidden');
   await speechCoach.resetSession();
   coachQuote.textContent =
@@ -411,6 +425,7 @@ async function loadSavedReference(): Promise<void> {
     if (Array.isArray(ref.frames) && ref.frames.length > 1) {
       savedReferenceRecording = ref;
       referenceHandPath = ref.frames.map((f) => getHandMidpoint2D(f.landmarks));
+      replay3D.setReferenceRecording(ref.frames, ref.phases, ref.handedness);
     }
   } catch {
     // Reference swing is optional
@@ -453,6 +468,7 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
   // 2. Compute 9 Biomechanical Metrics & Rank Faults Deterministically
   const metrics = calculateSwingMetrics(frames, phases, handedness);
   const faultsRanked = rankSwingFaults(metrics);
+  lastComputedMetrics = metrics;
   const alignment = alignAndScoreSwing(
     frames,
     phases,
@@ -468,8 +484,9 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
       ? computeImprovedFaults(previousFaults, faultsRanked, previousFocusFault)
       : [];
 
-  // 4. Update Biomechanical Metrics & Ranked Faults UI Card
+  // 4. Update Biomechanical Metrics, Ranked Faults UI Card & 3D Replay Viewer
   renderBiomechanicalMetricsUI(metrics, matchScore, improvedSinceLast);
+  replay3D.loadAlignedSwing(alignment, faultsRanked, handedness);
 
   const recordingId = `swing-${Date.now()}`;
   const recording: SwingRecording = {
@@ -953,10 +970,13 @@ function processLaptopPoseOnFrame(
     if (showSkeleton && lastCapturedFrames.length > 0) {
       drawPoseSkeletonOverlay(canvas, ctx, null, {
         perspective: 'face-on',
+        handedness,
         mirrored,
         capturedFrames: lastCapturedFrames,
         capturedPhases: lastCapturedPhases,
         referenceHandPath,
+        activeFaults: previousFaults,
+        latestMetrics: lastComputedMetrics,
       });
     }
     return;
@@ -982,6 +1002,7 @@ function processLaptopPoseOnFrame(
   if (showSkeleton) {
     drawPoseSkeletonOverlay(canvas, ctx, frame.landmarks, {
       perspective: 'face-on',
+      handedness,
       mirrored,
       isReliable,
       liveHandTrail,
@@ -990,6 +1011,8 @@ function processLaptopPoseOnFrame(
       capturedFrames: lastCapturedFrames,
       capturedPhases: lastCapturedPhases,
       referenceHandPath,
+      activeFaults: previousFaults,
+      latestMetrics: lastComputedMetrics,
     });
   }
 }
@@ -1212,6 +1235,10 @@ guideBtn.addEventListener('click', () => {
   redrawOverlays();
 });
 
+toggle3dStageBtn.addEventListener('click', () => {
+  replay3D.setExpandedStage(!replay3D.isExpanded());
+});
+
 uploadVideoBtn.addEventListener('click', () => {
   uploadVideoInput.click();
 });
@@ -1273,6 +1300,8 @@ clearTrailBtn.addEventListener('click', () => {
   dtlClubTrail = [];
   lastCapturedFrames = [];
   lastCapturedPhases = null;
+  previousFaults = [];
+  lastComputedMetrics = null;
   saveStatusBanner.classList.add('hidden');
   updateForceButtonUI('IDLE');
   redrawOverlays();
@@ -1282,6 +1311,11 @@ setReferenceBtn.addEventListener('click', async () => {
   if (!lastRecording) return;
   savedReferenceRecording = lastRecording;
   referenceHandPath = lastRecording.frames.map((f) => getHandMidpoint2D(f.landmarks));
+  replay3D.setReferenceRecording(
+    lastRecording.frames,
+    lastRecording.phases,
+    lastRecording.handedness
+  );
   try {
     const res = await fetch('/api/reference', {
       method: 'POST',

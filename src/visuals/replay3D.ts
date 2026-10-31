@@ -59,11 +59,11 @@ const KEY_SKELETON_JOINTS: number[] = [
 ];
 
 const CANONICAL_PHASES: Array<{ key: string; label: string; frame: number; color: string }> = [
-  { key: 'address', label: 'Address', frame: 0, color: '#38bdf8' },
-  { key: 'takeaway', label: 'Takeaway', frame: 18, color: '#a78bfa' },
-  { key: 'top', label: 'Top', frame: 50, color: '#f59e0b' },
-  { key: 'impact', label: 'Impact', frame: 75, color: '#ef4444' },
-  { key: 'finish', label: 'Finish', frame: 99, color: '#10b981' },
+  { key: 'address', label: 'Address', frame: 0, color: '#4a8ad6' },
+  { key: 'takeaway', label: 'Takeaway', frame: 18, color: '#38bdf8' },
+  { key: 'top', label: 'Top', frame: 50, color: '#d9a441' },
+  { key: 'impact', label: 'Impact', frame: 75, color: '#e5566f' },
+  { key: 'finish', label: 'Finish', frame: 99, color: '#44a282' },
 ];
 
 export class Replay3DViewer {
@@ -136,18 +136,19 @@ export class Replay3DViewer {
     this.container.innerHTML = `
       <div class="replay3d-card-header">
         <div class="replay3d-title-group">
-          <h2>🧊 3D Swing Replay</h2>
-          <span class="replay3d-phase-pill" id="r3d-phase-pill">ADDRESS</span>
+          <h2>3D Swing Rendering Lab</h2>
+          <span class="replay3d-phase-pill" id="r3d-phase-pill">Address</span>
+          <span class="replay3d-subnote">Normalized 3D skeleton · Torso = 1.0 · Drag to orbit, scroll to zoom</span>
         </div>
         <div class="row-inline">
-          <button type="button" class="btn btn-xs active" id="r3d-ghost-btn" title="Toggle Semi-Transparent Green Pro Reference Skeleton">
-            👻 Ghost: ON
+          <button type="button" class="btn btn-xs active" id="r3d-ghost-btn" title="Toggle semi-transparent green Pro Reference skeleton">
+            Pro Ghost: On
           </button>
-          <button type="button" class="btn btn-xs active" id="r3d-trails-btn" title="Toggle 3D Hand &amp; Clubhead Arc Ribbons">
-            〰️ Arc: ON
+          <button type="button" class="btn btn-xs active" id="r3d-trails-btn" title="Toggle 3D hand and clubhead arc ribbons">
+            3D Arcs: On
           </button>
-          <button type="button" class="btn btn-xs" id="r3d-expand-btn" title="Expand 3D Replay Studio into Main Viewport">
-            ⛶ Expand
+          <button type="button" class="btn btn-xs" id="r3d-expand-btn" title="Return to Live Camera Studio">
+            Live Cameras
           </button>
         </div>
       </div>
@@ -156,14 +157,14 @@ export class Replay3DViewer {
         <div class="replay3d-hud-top">
           <div class="segmented replay3d-cam-presets" id="r3d-cam-presets">
             <button type="button" class="seg-btn active" data-cam="face-on">Face-On</button>
-            <button type="button" class="seg-btn" data-cam="dtl">DTL (Behind)</button>
+            <button type="button" class="seg-btn" data-cam="dtl">Down-the-Line</button>
             <button type="button" class="seg-btn" data-cam="overhead">Overhead</button>
           </div>
-          <span class="replay3d-frame-badge" id="r3d-frame-counter">Frame 00 / 99</span>
+          <span class="replay3d-frame-badge num" id="r3d-frame-counter">Frame 00 / 99</span>
         </div>
 
         <div class="replay3d-legend-bar" id="r3d-fault-legend">
-          <span><i class="r3d-dot dot-user"></i>You (Fault Color-Coded)</span>
+          <span><i class="r3d-dot dot-user"></i>Golfer (Fault Color-Coded)</span>
           <span><i class="r3d-dot dot-ref"></i>Pro Reference Ghost</span>
           <span><i class="r3d-dot dot-club"></i>3D Club Arc</span>
         </div>
@@ -172,7 +173,7 @@ export class Replay3DViewer {
       <div class="replay3d-controls">
         <div class="replay3d-scrub-row">
           <button type="button" class="btn btn-primary btn-xs" id="r3d-play-btn" title="Play / Pause 3D Replay">
-            ⏸ Pause
+            Pause
           </button>
           <input
             type="range"
@@ -191,7 +192,7 @@ export class Replay3DViewer {
         </div>
 
         <div class="replay3d-phase-jumps" id="r3d-phase-jumps">
-          <span class="sub-label">Jump Phase:</span>
+          <span class="sub-label">Phase Jump</span>
           <button type="button" class="btn btn-xs r3d-jump-btn" data-frame="0">1. Address</button>
           <button type="button" class="btn btn-xs r3d-jump-btn" data-frame="18">2. Takeaway</button>
           <button type="button" class="btn btn-xs r3d-jump-btn" data-frame="50">3. Top</button>
@@ -264,7 +265,7 @@ export class Replay3DViewer {
     this.ghostBtn.addEventListener('click', () => {
       this.showGhostRef = !this.showGhostRef;
       this.ghostBtn.classList.toggle('active', this.showGhostRef);
-      this.ghostBtn.textContent = this.showGhostRef ? '👻 Ghost: ON' : '👻 Ghost: OFF';
+      this.ghostBtn.textContent = this.showGhostRef ? 'Pro Ghost: On' : 'Pro Ghost: Off';
       this.refGroup.root.visible = this.showGhostRef;
     });
 
@@ -272,7 +273,7 @@ export class Replay3DViewer {
     this.trailsBtn.addEventListener('click', () => {
       this.showTrails = !this.showTrails;
       this.trailsBtn.classList.toggle('active', this.showTrails);
-      this.trailsBtn.textContent = this.showTrails ? '〰️ Arc: ON' : '〰️ Arc: OFF';
+      this.trailsBtn.textContent = this.showTrails ? '3D Arcs: On' : '3D Arcs: Off';
       this.userGroup.handTrailLine.visible = this.showTrails;
       this.userGroup.clubTrailLine.visible = this.showTrails;
       this.refGroup.handTrailLine.visible = this.showTrails && this.showGhostRef;
@@ -288,7 +289,7 @@ export class Replay3DViewer {
     this.isExpandedStage = expanded;
     this.container.classList.toggle('replay3d-expanded-stage', expanded);
     this.expandBtn.classList.toggle('active', expanded);
-    this.expandBtn.textContent = expanded ? '✕ Exit Full 3D' : '⛶ Expand';
+    this.expandBtn.textContent = expanded ? 'Live Cameras' : 'Full Stage';
     if (this.onExpandChange) {
       this.onExpandChange(expanded);
     }
@@ -301,7 +302,7 @@ export class Replay3DViewer {
 
   private setPlaying(playing: boolean): void {
     this.isPlaying = playing;
-    this.playBtn.textContent = playing ? '⏸ Pause' : '▶ Play';
+    this.playBtn.textContent = playing ? 'Pause' : 'Play';
   }
 
   /**

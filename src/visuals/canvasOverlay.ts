@@ -145,11 +145,11 @@ export function drawPoseSkeletonOverlay(
     if (options.capturedPhases) {
       const p = options.capturedPhases;
       const phaseBadges: Array<{ label: string; idx: number; color: string }> = [
-        { label: 'ADDR', idx: p.address, color: '#38bdf8' },
-        { label: 'TAKE', idx: p.takeaway, color: '#a78bfa' },
-        { label: 'TOP', idx: p.top, color: '#f59e0b' },
-        { label: 'IMP', idx: p.impact, color: '#ef4444' },
-        { label: 'FIN', idx: p.finish, color: '#10b981' },
+        { label: 'ADDR', idx: p.address, color: '#4a8ad6' },
+        { label: 'TAKE', idx: p.takeaway, color: '#38bdf8' },
+        { label: 'TOP', idx: p.top, color: '#d9a441' },
+        { label: 'IMP', idx: p.impact, color: '#e5566f' },
+        { label: 'FIN', idx: p.finish, color: '#44a282' },
       ];
 
       ctx.font = '700 10px Inter, system-ui, sans-serif';
@@ -549,15 +549,15 @@ function draw2DOverlayLegend(
   activeFaults: SwingFault[]
 ): void {
   const primaryFault = activeFaults[0]
-    ? `⚠️ #1: ${activeFaults[0].replace(/_/g, ' ').toUpperCase()}`
-    : '✓ ON-PLANE';
-  const text = `🟢 Pro Ref Arc   🔴 Your Swing   ${primaryFault}`;
+    ? `FAULT #1: ${activeFaults[0].replace(/_/g, ' ').toUpperCase()}`
+    : 'ON-PLANE';
+  const text = `Pro Ref Arc  ·  Your Swing  ·  ${primaryFault}`;
   drawCalloutLabel(
     ctx,
     text,
     Math.max(12, w - ctx.measureText(text).width - 28),
     h - 54,
-    activeFaults.length > 0 ? '#f59e0b' : '#10b981'
+    activeFaults.length > 0 ? '#d9a441' : '#44a282'
   );
 }
 
@@ -687,10 +687,10 @@ function drawDtlSideProfileChain(
   if (isEarlyExtending) {
     drawCalloutLabel(
       ctx,
-      '⚠️ EARLY EXTENSION',
+      'EARLY EXTENSION',
       hipX + 12,
       hipY - 12,
-      '#ef4444'
+      '#e5566f'
     );
   }
 
@@ -717,8 +717,8 @@ function drawTrackedGolfClub(
 
   // Outer glow along club shaft
   ctx.strokeStyle = isVirtual
-    ? 'rgba(167, 139, 250, 0.35)'
-    : 'rgba(232, 121, 249, 0.42)';
+    ? 'rgba(74, 138, 214, 0.35)'
+    : 'rgba(217, 164, 65, 0.42)';
   ctx.lineWidth = 7;
   ctx.lineCap = 'round';
   ctx.beginPath();
@@ -727,7 +727,7 @@ function drawTrackedGolfClub(
   ctx.stroke();
 
   // Crisp inner shaft line
-  ctx.strokeStyle = isVirtual ? '#c4b5fd' : '#f0abfc';
+  ctx.strokeStyle = isVirtual ? '#93c5fd' : '#fde68a';
   ctx.lineWidth = 2.8;
   if (isVirtual) {
     ctx.setLineDash([6, 4]);
@@ -741,7 +741,7 @@ function drawTrackedGolfClub(
   // Clubhead Toe/Face marker
   ctx.beginPath();
   ctx.arc(cx, cy, 6.5, 0, Math.PI * 2);
-  ctx.fillStyle = isVirtual ? '#a78bfa' : '#e879f9';
+  ctx.fillStyle = isVirtual ? '#4a8ad6' : '#d9a441';
   ctx.fill();
   ctx.lineWidth = 2;
   ctx.strokeStyle = '#090d16';
@@ -751,7 +751,7 @@ function drawTrackedGolfClub(
   const label = isVirtual
     ? `V-CLUB ${club.shaftAngleDeg}°`
     : `CLUB ${club.shaftAngleDeg}°`;
-  drawCalloutLabel(ctx, label, cx + 10, cy + 4, isVirtual ? '#c4b5fd' : '#f0abfc');
+  drawCalloutLabel(ctx, label, cx + 10, cy + 4, isVirtual ? '#93c5fd' : '#fde68a');
 
   ctx.restore();
 }

@@ -48,7 +48,12 @@ const phoneCanvas = document.getElementById('phone-canvas') as HTMLCanvasElement
 const phoneCtx = phoneCanvas.getContext('2d')!;
 const phoneRotateBtn = document.getElementById('phone-rotate-btn') as HTMLButtonElement;
 
-// Top Bar Controls
+// Top Bar & Workspace Tabs
+const tabLiveCameras = document.getElementById('tab-live-cameras') as HTMLButtonElement;
+const toggle3dStageBtn = document.getElementById('toggle-3d-stage-btn') as HTMLButtonElement;
+const videoPanel = document.getElementById('video-panel') as HTMLElement;
+const replay3dCard = document.getElementById('replay-3d-card') as HTMLDivElement;
+
 const angleToggle = document.getElementById('angle-toggle') as HTMLDivElement;
 const laptopCameraSelect = document.getElementById('laptop-camera-select') as HTMLSelectElement;
 const phoneCameraSelect = document.getElementById('phone-camera-select') as HTMLSelectElement;
@@ -59,8 +64,6 @@ const skeletonBtn = document.getElementById('skeleton-btn') as HTMLButtonElement
 const clubTrackBtn = document.getElementById('club-track-btn') as HTMLButtonElement;
 const mirrorBtn = document.getElementById('mirror-btn') as HTMLButtonElement;
 const guideBtn = document.getElementById('guide-btn') as HTMLButtonElement;
-const toggle3dStageBtn = document.getElementById('toggle-3d-stage-btn') as HTMLButtonElement;
-const replay3dCard = document.getElementById('replay-3d-card') as HTMLDivElement;
 const uploadVideoBtn = document.getElementById('upload-video-btn') as HTMLButtonElement;
 const uploadVideoInput = document.getElementById('upload-video-input') as HTMLInputElement;
 const handednessToggle = document.getElementById('handedness-toggle') as HTMLDivElement;
@@ -145,12 +148,45 @@ const phoneCamManager = new CameraManager(phoneVideo);
 const laptopPoseTracker = new PoseTracker(1.2, 0.08, 1.0);
 const phonePoseTracker = new PoseTracker(1.2, 0.08, 1.0);
 const captureFSM = new SwingCaptureFSM('right');
+
+let activeWorkspaceTab: 'cameras' | '3d' = 'cameras';
+
+function applyWorkspaceTabDOM(tab: 'cameras' | '3d'): void {
+  activeWorkspaceTab = tab;
+  const is3D = tab === '3d';
+  tabLiveCameras.classList.toggle('active', !is3D);
+  toggle3dStageBtn.classList.toggle('active', is3D);
+  videoPanel.classList.toggle('hidden', is3D);
+  replay3dCard.classList.toggle('hidden', !is3D);
+  requestAnimationFrame(() => {
+    if (is3D) {
+      replay3D.handleResize();
+    } else {
+      syncPhonePortraitRotation();
+      redrawOverlays();
+    }
+  });
+}
+
 const replay3D = new Replay3DViewer(replay3dCard, {
   onExpandChange: (expanded) => {
-    toggle3dStageBtn.classList.toggle('active', expanded);
-    toggle3dStageBtn.textContent = expanded ? '🧊 Exit 3D' : '🧊 3D Studio';
+    applyWorkspaceTabDOM(expanded ? '3d' : 'cameras');
   },
 });
+
+function setWorkspaceTab(tab: 'cameras' | '3d'): void {
+  if (tab === '3d') {
+    applyWorkspaceTabDOM('3d');
+    if (!replay3D.isExpanded()) {
+      replay3D.setExpandedStage(true);
+    }
+  } else {
+    applyWorkspaceTabDOM('cameras');
+    if (replay3D.isExpanded()) {
+      replay3D.setExpandedStage(false);
+    }
+  }
+}
 
 let viewMode: ViewMode = 'dual';
 let isMirrored = true;
@@ -197,7 +233,7 @@ function renderBiomechanicalMetricsUI(
   // Improved since last swing banner
   if (improvedFaults.length > 0) {
     const names = improvedFaults.map((f) => FAULT_LABELS[f] || f.replace(/_/g, ' '));
-    improvedFaultsBanner.textContent = `✨ Fixed since last swing: ${names.join(', ')}`;
+    improvedFaultsBanner.textContent = `Resolved since previous swing: ${names.join(', ')}`;
     improvedFaultsBanner.classList.remove('hidden');
   } else {
     improvedFaultsBanner.classList.add('hidden');
@@ -210,7 +246,7 @@ function renderBiomechanicalMetricsUI(
   if (faultEvaluations.length === 0) {
     const cleanDiv = document.createElement('div');
     cleanDiv.className = 'fault-clean-state';
-    cleanDiv.textContent = '✓ Clean Swing — All 9 Biomechanical Metrics on Target!';
+    cleanDiv.textContent = 'Clean Swing — All 9 Biomechanical Metrics on Target';
     faultsRankedList.appendChild(cleanDiv);
   } else {
     faultEvaluations.forEach((ev, idx) => {
@@ -260,17 +296,17 @@ const speechCoach = new SpeechCoach({
     pttBtn.classList.toggle('listening', status === 'listening');
 
     if (status === 'listening') {
-      coachStatusText.textContent = 'Listening to microphone... (release Spacebar to send)';
-      pttBtn.innerHTML = '🔴 Listening... Release <strong>SPACEBAR</strong> to Send';
+      coachStatusText.textContent = 'Listening to microphone (release Spacebar to send)';
+      pttBtn.innerHTML = 'Listening... Release <strong>SPACEBAR</strong> to Send';
     } else if (status === 'thinking') {
-      coachStatusText.textContent = 'Coach is analyzing swing biomechanics...';
-      pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
+      coachStatusText.textContent = 'Analyzing swing biomechanics...';
+      pttBtn.innerHTML = 'Hold <strong>SPACEBAR</strong> to Talk';
     } else if (status === 'speaking') {
-      coachStatusText.textContent = 'Coach is speaking aloud...';
-      pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
+      coachStatusText.textContent = 'Speaking coaching response...';
+      pttBtn.innerHTML = 'Hold <strong>SPACEBAR</strong> to Talk';
     } else {
-      coachStatusText.textContent = 'Ready — swing or hold Spacebar to ask a question';
-      pttBtn.innerHTML = '🎤 Hold <strong>SPACEBAR</strong> to Ask Coach';
+      coachStatusText.textContent = 'Ready — swing or hold Spacebar to ask';
+      pttBtn.innerHTML = 'Hold <strong>SPACEBAR</strong> to Talk';
     }
   },
   onTranscriptUpdate: (transcript) => {
@@ -286,10 +322,10 @@ const speechCoach = new SpeechCoach({
     coachLatencyTag.textContent = `${res.latencyMs ?? 0}ms`;
 
     if (res.source === 'gemini') {
-      coachSourceBadge.textContent = '● Gemini 2.5';
+      coachSourceBadge.textContent = 'Gemini 2.5';
       coachSourceBadge.className = 'coach-badge gemini';
     } else {
-      coachSourceBadge.textContent = '● Fallback Template';
+      coachSourceBadge.textContent = 'Fallback';
       coachSourceBadge.className = 'coach-badge fallback';
     }
   },
@@ -299,10 +335,10 @@ const speechCoach = new SpeechCoach({
     coachLatencyTag.textContent = `${res.latencyMs ?? 0}ms`;
 
     if (res.source === 'gemini') {
-      coachSourceBadge.textContent = '● Gemini 2.5';
+      coachSourceBadge.textContent = 'Gemini 2.5';
       coachSourceBadge.className = 'coach-badge gemini';
     } else {
-      coachSourceBadge.textContent = '● Fallback Template';
+      coachSourceBadge.textContent = 'Fallback';
       coachSourceBadge.className = 'coach-badge fallback';
     }
   },
@@ -319,10 +355,10 @@ async function checkBackendHealth(): Promise<void> {
     const res = await fetch('/api/health');
     const data = await res.json();
     if (data.geminiConfigured) {
-      coachSourceBadge.textContent = '● Gemini Ready';
+      coachSourceBadge.textContent = 'Gemini Ready';
       coachSourceBadge.className = 'coach-badge gemini';
     } else {
-      coachSourceBadge.textContent = 'Key needed (.env)';
+      coachSourceBadge.textContent = 'Key Needed (.env)';
       coachSourceBadge.className = 'coach-badge fallback';
     }
   } catch (_err) {
@@ -344,12 +380,14 @@ document.querySelectorAll('.btn-sim').forEach((btn) => {
       );
       statBackswingMs.textContent = `${scenario.metrics.backswing_ms} ms`;
       statDownswingMs.textContent = `${scenario.metrics.downswing_ms} ms`;
-      tempoBadge.textContent = `Tempo: ${scenario.metrics.tempo_ratio} : 1`;
+      tempoBadge.textContent = `${scenario.metrics.tempo_ratio} : 1`;
       previousFaults = scenario.faults_ranked;
       lastComputedMetrics = scenario.metrics;
       replay3D.loadSimulatedScenario(key, scenario.faults_ranked, handedness);
       speechCoach.requestSwingCoaching(scenario);
     }
+    const parentDetails = btn.closest('details');
+    if (parentDetails) parentDetails.removeAttribute('open');
   });
 });
 
@@ -370,13 +408,13 @@ qaForm.addEventListener('submit', (e) => {
 coachAutoBtn.addEventListener('click', () => {
   autoCoachEnabled = !autoCoachEnabled;
   coachAutoBtn.classList.toggle('active', autoCoachEnabled);
-  coachAutoBtn.textContent = autoCoachEnabled ? '⚡ Auto' : 'Auto: OFF';
+  coachAutoBtn.textContent = autoCoachEnabled ? 'Auto' : 'Auto: OFF';
 });
 
 coachMuteBtn.addEventListener('click', () => {
   const nextMuted = !speechCoach.getMuted();
   speechCoach.setMuted(nextMuted);
-  coachMuteBtn.textContent = nextMuted ? '🔇 Muted' : '🔊 TTS';
+  coachMuteBtn.textContent = nextMuted ? 'Muted' : 'TTS';
 });
 
 coachReplayBtn.addEventListener('click', () => {
@@ -544,12 +582,12 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
     if (res.ok) {
       const data = await res.json();
       saveStatusBanner.classList.remove('hidden');
-      saveStatusBanner.textContent = `✓ Swing #${sessionSwingCount} (${matchScore}%) saved to ${data.filename}`;
+      saveStatusBanner.textContent = `Swing #${sessionSwingCount} (${matchScore}%) saved to ${data.filename}`;
     }
   } catch (err) {
     console.warn('Could not persist swing to backend API (offline mode):', err);
     saveStatusBanner.classList.remove('hidden');
-    saveStatusBanner.textContent = `✓ Swing #${sessionSwingCount} (${matchScore}%) captured locally (Click ⬇ JSON to save)`;
+    saveStatusBanner.textContent = `Swing #${sessionSwingCount} (${matchScore}%) captured locally (Click Export JSON to save)`;
   }
 });
 
@@ -571,19 +609,19 @@ function updateCaptureUI(
   hudHoldProgress.style.width = `${Math.round(telemetry.holdProgress * 100)}%`;
 
   statVisibility.textContent = `${Math.round(keyVisibility * 100)}%`;
-  statVisibility.style.color = keyVisibility >= 0.5 ? '#34d399' : '#fbbf24';
+  statVisibility.style.color = keyVisibility >= 0.5 ? '#44a282' : '#d9a441';
 
   statHandSpeed.textContent = `${telemetry.handSpeed.toFixed(2)} /s`;
 
   if (telemetry.wristsBelowHips && telemetry.isStill) {
-    statAddressCheck.textContent = '✓ Ready (Still)';
-    statAddressCheck.style.color = '#34d399';
+    statAddressCheck.textContent = 'Ready (Still)';
+    statAddressCheck.style.color = '#44a282';
   } else if (telemetry.wristsBelowHips) {
     statAddressCheck.textContent = 'Moving...';
-    statAddressCheck.style.color = '#fbbf24';
+    statAddressCheck.style.color = '#d9a441';
   } else {
     statAddressCheck.textContent = 'Hands High';
-    statAddressCheck.style.color = '#94a3b8';
+    statAddressCheck.style.color = '#8a8c92';
   }
 
   statFrameCount.textContent =
@@ -601,25 +639,25 @@ function updateCaptureUI(
 function updateClubTelemetryUI(club: ClubState): void {
   if (clubTrackingMode === 'off') {
     statClubStatus.textContent = 'OFF (Hands Only)';
-    statClubStatus.style.color = '#94a3b8';
+    statClubStatus.style.color = '#8a8c92';
   } else if (club.detected && club.source === 'cv') {
-    statClubStatus.textContent = `🏌️ Club ${club.shaftAngleDeg}°`;
-    statClubStatus.style.color = '#f0abfc';
+    statClubStatus.textContent = `Club ${club.shaftAngleDeg}°`;
+    statClubStatus.style.color = '#ffffff';
   } else if (club.detected && club.source === 'virtual') {
-    statClubStatus.textContent = `✨ Virtual ${club.shaftAngleDeg}°`;
-    statClubStatus.style.color = '#c4b5fd';
+    statClubStatus.textContent = `Virtual ${club.shaftAngleDeg}°`;
+    statClubStatus.style.color = '#4a8ad6';
   } else {
-    statClubStatus.textContent = '✋ Hands Only';
-    statClubStatus.style.color = '#38bdf8';
+    statClubStatus.textContent = 'Hands Only';
+    statClubStatus.style.color = '#8a8c92';
   }
 }
 
 function updateForceButtonUI(state: string): void {
   if (state === 'RECORDING' || state === 'FOLLOW_THROUGH') {
-    forceCaptureBtn.textContent = '⏹ Force Stop Capture';
+    forceCaptureBtn.textContent = 'Stop Capture';
     forceCaptureBtn.className = 'btn btn-danger';
   } else {
-    forceCaptureBtn.textContent = '▶ Force Start Capture';
+    forceCaptureBtn.textContent = 'Force Capture';
     forceCaptureBtn.className = 'btn btn-primary';
   }
 }
@@ -656,25 +694,25 @@ function updateViewLayout(): void {
   const targetIsLeftOnScreen =
     (handedness === 'right' && isMirrored) || (handedness === 'left' && !isMirrored);
   laptopTargetIndicator.textContent = targetIsLeftOnScreen
-    ? '⬅ Target Direction (Lead Side)'
-    : 'Target Direction (Lead Side) ➔';
+    ? '← Target Direction (Lead Side)'
+    : 'Target Direction (Lead Side) →';
 
   if (viewMode === 'face-on') {
-    checklistTitle.textContent = '💻 Laptop Face-On (Landscape)';
+    checklistTitle.textContent = 'Laptop Face-On (Landscape)';
     checklistItems.innerHTML = `
-      <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s until the beep locks address.</li>
+      <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s until the tone locks address.</li>
       <li><strong>9 Biomechanical Metrics:</strong> Head movement, hip sway &amp; weight shift anchored in cm (torso=50cm); rotations &amp; lead arm angle blended in 3D+2D.</li>
       <li><strong>Optional Club Tracking:</strong> Automatically tracks your golf club shaft &amp; clubhead when held, or works hands-only without a club.</li>
       <li><strong>Auto Voice Coaching:</strong> Speaks personalized Gemini feedback immediately after finish.</li>
     `;
   } else if (viewMode === 'dtl') {
-    checklistTitle.textContent = '📱 Phone DroidCam (Portrait DTL)';
+    checklistTitle.textContent = 'Phone DroidCam (Portrait DTL)';
     checklistItems.innerHTML = `
       <li><strong>Side-Profile Posture Chain:</strong> Tracks <em>Spine Tilt (°)</em>, <em>Knee Flex (°)</em>, <em>Dynamic Tush Line</em>, and <em>Arm/Hand Plane Slot</em>.</li>
       <li><strong>Optional Club Plane:</strong> Tracks shaft plane angle &amp; clubhead arc when holding a club (not required).</li>
     `;
   } else {
-    checklistTitle.textContent = '⚡ 90° Dual View (Face-On + DTL + Auto Coach)';
+    checklistTitle.textContent = '90° Dual View (Face-On + DTL)';
     checklistItems.innerHTML = `
       <li><strong>Laptop (Front-On):</strong> Tracks bilateral body rotation, sway, lead arm, 9 metrics &amp; auto-triggers spoken coaching.</li>
       <li><strong>Phone (Portrait DTL):</strong> Simultaneously tracks side-profile <em>Spine Tilt</em>, <em>Knee Flex</em>, <em>Tush Line</em>, and <em>Swing Plane</em>.</li>
@@ -871,12 +909,12 @@ async function populateCameras(autoStart = true): Promise<void> {
   if (availableDevices.length === 0) {
     phoneDetectBanner.className = 'banner banner-warn';
     phoneDetectBanner.textContent =
-      'No cameras detected. Start DroidCam and make sure your laptop webcam is enabled, then click ↻.';
+      'No cameras detected. Start DroidCam and make sure your laptop webcam is enabled, then click Refresh Devices.';
     return;
   }
 
   availableDevices.forEach((device) => {
-    const label = device.isPhoneCam ? `📱 ${device.label}` : `💻 ${device.label}`;
+    const label = device.isPhoneCam ? `[Phone] ${device.label}` : `[Webcam] ${device.label}`;
 
     const optLaptop = document.createElement('option');
     optLaptop.value = device.deviceId;
@@ -900,10 +938,10 @@ async function populateCameras(autoStart = true): Promise<void> {
 
   if (phoneCam.isPhoneCam && !laptopCam.isPhoneCam) {
     phoneDetectBanner.className = 'banner banner-success';
-    phoneDetectBanner.innerHTML = `<strong>💻 Laptop:</strong> ${laptopCam.label}<br/><strong>📱 Phone (DroidCam):</strong> ${phoneCam.label}`;
+    phoneDetectBanner.innerHTML = `<strong>Laptop:</strong> ${laptopCam.label}<br/><strong>Phone (DroidCam):</strong> ${phoneCam.label}`;
   } else {
     phoneDetectBanner.className = 'banner banner-info';
-    phoneDetectBanner.innerHTML = `<strong>💻 Laptop:</strong> ${laptopCam.label}<br/><strong>📱 Phone:</strong> ${phoneCam.label}`;
+    phoneDetectBanner.innerHTML = `<strong>Laptop:</strong> ${laptopCam.label}<br/><strong>Phone:</strong> ${phoneCam.label}`;
   }
 
   if (autoStart) {
@@ -922,7 +960,7 @@ async function syncActiveStreams(): Promise<void> {
     laptopStatusPill.className = 'hud-pill status-pill';
     try {
       const stats = await laptopCamManager.startCamera(laptopId, targetFps);
-      laptopStatusPill.textContent = '● LIVE';
+      laptopStatusPill.textContent = 'LIVE';
       laptopStatusPill.className = 'hud-pill status-pill connected';
       laptopResPill.textContent = `${stats.width} × ${stats.height}`;
       statLaptopDevice.textContent = stats.deviceLabel;
@@ -941,7 +979,7 @@ async function syncActiveStreams(): Promise<void> {
     phoneStatusPill.className = 'hud-pill status-pill';
     try {
       const stats = await phoneCamManager.startCamera(phoneId, targetFps);
-      phoneStatusPill.textContent = '● LIVE';
+      phoneStatusPill.textContent = 'LIVE';
       phoneStatusPill.className = 'hud-pill status-pill connected';
       statPhoneDevice.textContent = stats.deviceLabel;
       syncPhonePortraitRotation();
@@ -1039,11 +1077,11 @@ function processPhoneDtlPoseOnFrame(
 
   // Update DTL HUD & Sidebar posture readouts
   if (dtlMetrics) {
-    const clubLabel = club.detected ? ` | 🏌️ ${club.shaftAngleDeg}°` : '';
+    const clubLabel = club.detected ? ` | Club ${club.shaftAngleDeg}°` : '';
     phonePosePill.textContent = `Spine ${dtlMetrics.spineTiltDeg}° | Knee ${dtlMetrics.kneeFlexDeg}°${clubLabel}`;
     statDtlPosture.textContent = `Spine ${dtlMetrics.spineTiltDeg}° / Knee ${dtlMetrics.kneeFlexDeg}°`;
     statDtlPosture.style.color =
-      dtlMetrics.spineTiltDeg >= 25 && dtlMetrics.spineTiltDeg <= 52 ? '#38bdf8' : '#fbbf24';
+      dtlMetrics.spineTiltDeg >= 25 && dtlMetrics.spineTiltDeg <= 52 ? '#44a282' : '#d9a441';
   }
 
   let fsmState = captureFSM.getState();
@@ -1150,7 +1188,7 @@ phoneRotateBtn.addEventListener('click', () => {
   else if (phoneRotationDeg === -90) phoneRotationDeg = 0;
   else phoneRotationDeg = 90;
 
-  phoneRotateBtn.textContent = `⟳ ${phoneRotationDeg}°`;
+  phoneRotateBtn.textContent = `Rotate ${phoneRotationDeg}°`;
   phonePoseTracker.resetFilter();
   syncPhonePortraitRotation();
 });
@@ -1159,7 +1197,14 @@ angleToggle.addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest('.seg-btn') as HTMLButtonElement | null;
   if (!btn) return;
   const newMode = btn.dataset.angle as ViewMode;
-  if (!newMode || newMode === viewMode) return;
+  if (!newMode) return;
+
+  // If user is on the 3D tab and clicks a camera angle button, switch back to Live Camera Studio
+  if (activeWorkspaceTab === '3d') {
+    setWorkspaceTab('cameras');
+  }
+
+  if (newMode === viewMode) return;
 
   viewMode = newMode;
   angleToggle.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
@@ -1202,15 +1247,15 @@ skeletonBtn.addEventListener('click', () => {
 clubTrackBtn.addEventListener('click', () => {
   if (clubTrackingMode === 'auto') {
     clubTrackingMode = 'virtual';
-    clubTrackBtn.textContent = '✨ Club: Virtual';
+    clubTrackBtn.textContent = 'Club: Virtual';
     clubTrackBtn.classList.add('active');
   } else if (clubTrackingMode === 'virtual') {
     clubTrackingMode = 'off';
-    clubTrackBtn.textContent = '✋ Club: OFF';
+    clubTrackBtn.textContent = 'Club: OFF';
     clubTrackBtn.classList.remove('active');
   } else {
     clubTrackingMode = 'auto';
-    clubTrackBtn.textContent = '🏌️ Club: Auto';
+    clubTrackBtn.textContent = 'Club: Auto';
     clubTrackBtn.classList.add('active');
   }
 
@@ -1235,8 +1280,36 @@ guideBtn.addEventListener('click', () => {
   redrawOverlays();
 });
 
+tabLiveCameras.addEventListener('click', () => {
+  setWorkspaceTab('cameras');
+});
+
 toggle3dStageBtn.addEventListener('click', () => {
-  replay3D.setExpandedStage(!replay3D.isExpanded());
+  setWorkspaceTab('3d');
+});
+
+// Auto-close floating <details> menus (nav-dropdown, inline-dropdown, info-popover) when clicking outside or opening another
+const floatingDetailsSelector = 'details.nav-dropdown, details.inline-dropdown, details.info-popover';
+document.querySelectorAll<HTMLDetailsElement>(floatingDetailsSelector).forEach((detailsEl) => {
+  detailsEl.addEventListener('toggle', () => {
+    if (detailsEl.open) {
+      document.querySelectorAll<HTMLDetailsElement>(floatingDetailsSelector).forEach((other) => {
+        if (other !== detailsEl && other.open) {
+          other.removeAttribute('open');
+        }
+      });
+    }
+  });
+});
+
+document.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  document.querySelectorAll<HTMLDetailsElement>(floatingDetailsSelector).forEach((detailsEl) => {
+    if (detailsEl.open && !detailsEl.contains(target)) {
+      detailsEl.removeAttribute('open');
+    }
+  });
 });
 
 uploadVideoBtn.addEventListener('click', () => {
@@ -1256,7 +1329,7 @@ uploadVideoInput.addEventListener('change', async () => {
     mirrorBtn.textContent = 'Mirror: OFF';
 
     const stats = await laptopCamManager.startVideoFile(file);
-    laptopStatusPill.textContent = '● VIDEO FILE';
+    laptopStatusPill.textContent = 'VIDEO FILE';
     laptopStatusPill.className = 'hud-pill status-pill connected';
     laptopResPill.textContent = `${stats.width} × ${stats.height}`;
     statLaptopDevice.textContent = stats.deviceLabel;
@@ -1324,11 +1397,11 @@ setReferenceBtn.addEventListener('click', async () => {
     });
     if (res.ok) {
       saveStatusBanner.classList.remove('hidden');
-      saveStatusBanner.textContent = '⭐ Saved last swing as data/reference.json!';
+      saveStatusBanner.textContent = 'Saved last swing as data/reference.json';
     }
   } catch {
     saveStatusBanner.classList.remove('hidden');
-    saveStatusBanner.textContent = '⭐ Set as active reference in memory!';
+    saveStatusBanner.textContent = 'Set as active reference in memory';
   }
 });
 

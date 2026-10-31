@@ -1,222 +1,475 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Golf Swing Coach — Pose, Biomechanical Metrics &amp; AI Speech Coach</title>
+    <title>Golf Swing Coach — Biomechanics &amp; AI Voice Coach</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Public+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <div id="app">
-      <!-- Top Control Bar -->
+    <div id="app" data-ui>
+      <!-- Top Shell Bar: Brand, Workspace Mode Tabs, Quick Capture Controls, and Pull-Down Menus -->
       <header class="topbar">
-        <div class="brand">
-          <span class="brand-dot"></span>
-          <h1>Golf Swing Coach</h1>
-          <span class="phase-tag">Biomechanical Metrics + AI Speech Coach</span>
+        <div class="topbar-left">
+          <div class="brand">
+            <svg class="brand-mark" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.5" />
+              <path d="M5.5 14.5C7 9.5 11 6.5 15.5 5.5" stroke="#44a282" stroke-width="1.75" stroke-linecap="round" />
+              <circle cx="15.5" cy="5.5" r="2" fill="#44a282" />
+            </svg>
+            <h1>Golf Swing Coach</h1>
+          </div>
+
+          <!-- Primary Workspace Mode Switcher (Main View Tabs) -->
+          <nav class="workspace-tabs" aria-label="Primary Workspace View">
+            <button
+              type="button"
+              class="ws-tab active"
+              id="tab-live-cameras"
+              data-ws-tab="cameras"
+            >
+              Live Camera Studio
+            </button>
+            <button
+              type="button"
+              class="ws-tab"
+              id="toggle-3d-stage-btn"
+              data-ws-tab="3d"
+              title="Switch main view to interactive 3D Swing Rendering Lab"
+            >
+              3D Rendering Lab
+            </button>
+          </nav>
         </div>
 
-        <div class="controls-bar">
-          <!-- View Mode -->
-          <div class="control-group">
-            <label>View Mode</label>
-            <div class="segmented" id="angle-toggle">
-              <button type="button" class="seg-btn" data-angle="face-on" title="Laptop Webcam facing your chest (Landscape)">
-                💻 Face-On
-              </button>
-              <button type="button" class="seg-btn" data-angle="dtl" title="Phone DroidCam perpendicular behind the swing (Portrait)">
-                📱 DTL (Phone)
-              </button>
-              <button type="button" class="seg-btn active" data-angle="dual" title="Laptop Landscape (Front) + Phone Portrait (Behind)">
-                ⚡ Dual View
-              </button>
+        <!-- Center Toolbar: Camera Angles + Primary Capture Actions -->
+        <div class="topbar-center">
+          <div class="segmented" id="angle-toggle" role="group" aria-label="Camera View Mode">
+            <button
+              type="button"
+              class="seg-btn"
+              data-angle="face-on"
+              title="Laptop webcam facing chest (Landscape)"
+            >
+              Face-On
+            </button>
+            <button
+              type="button"
+              class="seg-btn"
+              data-angle="dtl"
+              title="Phone DroidCam perpendicular behind hands (Portrait)"
+            >
+              Down-the-Line
+            </button>
+            <button
+              type="button"
+              class="seg-btn active"
+              data-angle="dual"
+              title="Simultaneous Laptop Face-On + Phone Down-the-Line"
+            >
+              90° Dual View
+            </button>
+          </div>
+
+          <div class="toolbar-divider" role="separator"></div>
+
+          <div class="row-inline">
+            <button
+              id="force-capture-btn"
+              class="btn btn-primary"
+              title="Manual start/stop override for testing in tight spaces"
+            >
+              Start Capture
+            </button>
+            <button
+              id="clear-trail-btn"
+              class="btn"
+              title="Clear drawn path and reset capture state"
+            >
+              Reset
+            </button>
+            <button
+              id="upload-video-btn"
+              class="btn"
+              title="Load a recorded swing video file for analysis"
+            >
+              Load Video
+            </button>
+            <input type="file" id="upload-video-input" accept="video/*" class="hidden" />
+          </div>
+        </div>
+
+        <!-- Right Utility Menus: Overlays Dropdown, Telemetry Pull-Out, Setup Info, Device Settings -->
+        <div class="topbar-right">
+          <!-- 1. Overlays & Golfer Dropdown -->
+          <details class="nav-dropdown" id="dropdown-overlays">
+            <summary class="nav-dropdown-trigger">
+              <span>Overlays</span>
+              <svg class="chevron-icon" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </summary>
+            <div class="nav-dropdown-panel">
+              <div class="dropdown-section-title">Golfer Orientation</div>
+              <div class="dropdown-row">
+                <span>Handedness</span>
+                <div class="segmented" id="handedness-toggle">
+                  <button type="button" class="seg-btn active" data-hand="right">Right</button>
+                  <button type="button" class="seg-btn" data-hand="left">Left</button>
+                </div>
+              </div>
+
+              <div class="dropdown-rule"></div>
+              <div class="dropdown-section-title">Canvas Overlays</div>
+
+              <div class="dropdown-toggles-list">
+                <button
+                  id="skeleton-btn"
+                  class="btn btn-toggle active"
+                  title="Toggle MediaPipe 2D Skeleton and DTL Posture Chain"
+                >
+                  Skeleton: ON
+                </button>
+                <button
+                  id="club-track-btn"
+                  class="btn btn-toggle active"
+                  title="Golf club tracking mode: Auto / Virtual / Off"
+                >
+                  Club: Auto
+                </button>
+                <button
+                  id="mirror-btn"
+                  class="btn btn-toggle active"
+                  title="Flip laptop video horizontally"
+                >
+                  Mirror: ON
+                </button>
+                <button
+                  id="guide-btn"
+                  class="btn btn-toggle active"
+                  title="Show camera framing guides"
+                >
+                  Guide: ON
+                </button>
+              </div>
             </div>
-          </div>
+          </details>
 
-          <!-- Dedicated Laptop Camera Selector -->
-          <div class="control-group" id="laptop-cam-group">
-            <label for="laptop-camera-select">💻 Laptop Cam</label>
-            <div class="row-inline">
-              <select id="laptop-camera-select" title="Select Laptop Webcam (Landscape)">
-                <option value="">Detecting...</option>
-              </select>
+          <!-- 2. Live Capture Telemetry & Reference Export Pull-Out -->
+          <details class="nav-dropdown" id="dropdown-telemetry">
+            <summary class="nav-dropdown-trigger" title="Live capture state machine telemetry and reference swing export">
+              <span>Telemetry</span>
+              <span class="fsm-badge state-idle" id="sidebar-fsm-badge">IDLE</span>
+              <svg class="chevron-icon" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </summary>
+            <div class="nav-dropdown-panel panel-wide">
+              <div class="dropdown-section-title">Swing Capture Telemetry</div>
+              <div class="telemetry-grid">
+                <div class="stat-box">
+                  <span class="stat-label">Key Visibility</span>
+                  <span class="stat-val num" id="stat-visibility">—</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Hand Speed</span>
+                  <span class="stat-val num" id="stat-hand-speed">0.00 /s</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Address Posture</span>
+                  <span class="stat-val" id="stat-address-check">Waiting</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Captured Frames</span>
+                  <span class="stat-val num" id="stat-frame-count">0</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Club Tracker</span>
+                  <span class="stat-val" id="stat-club-status">Hands Only</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">DTL Spine / Knee</span>
+                  <span class="stat-val num" id="stat-dtl-posture">—</span>
+                </div>
+              </div>
+
+              <div class="dropdown-rule"></div>
+              <div class="dropdown-section-title">Reference &amp; Recording Export</div>
+              <div class="btn-row-actions">
+                <button
+                  id="set-reference-btn"
+                  class="btn"
+                  disabled
+                  title="Save last captured swing as data/reference.json"
+                >
+                  Set as Reference
+                </button>
+                <button
+                  id="download-json-btn"
+                  class="btn"
+                  disabled
+                  title="Download last captured swing keypoints JSON"
+                >
+                  Export JSON
+                </button>
+              </div>
+              <div id="save-status-banner" class="save-status hidden"></div>
             </div>
-          </div>
+          </details>
 
-          <!-- Dedicated Phone (DroidCam) Selector -->
-          <div class="control-group" id="phone-cam-group">
-            <label for="phone-camera-select">📱 Phone Cam</label>
-            <div class="row-inline">
-              <select id="phone-camera-select" title="Select DroidCam / Phone Camera (Portrait)">
-                <option value="">Detecting...</option>
-              </select>
-              <button id="refresh-cameras-btn" class="btn btn-icon" title="Refresh camera list">
-                ↻
-              </button>
+          <!-- 3. Framing & Setup Guide Info Popover (ⓘ) -->
+          <details class="nav-dropdown" id="dropdown-guide-info">
+            <summary class="nav-dropdown-trigger btn-info-trigger" title="Camera setup geometry and framing guide">
+              <span class="info-glyph" aria-hidden="true">i</span>
+              <span>Setup Guide</span>
+            </summary>
+            <div class="nav-dropdown-panel panel-wide">
+              <div class="dropdown-section-title" id="checklist-title">90° Dual View Setup</div>
+              <p class="guide-summary-text">
+                Place the laptop facing your chest (Face-On) and your phone on a tripod behind your hands looking down the target line (Down-the-Line).
+              </p>
+              <ul class="checklist" id="checklist-items"></ul>
             </div>
-          </div>
+          </details>
 
-          <!-- MediaPipe Pose Model Variant -->
-          <div class="control-group">
-            <label for="pose-model-select">Pose Model</label>
-            <select id="pose-model-select" title="MediaPipe PoseLandmarker Model Variant">
-              <option value="lite">Lite (Fastest)</option>
-              <option value="full" selected>Full (Default)</option>
-              <option value="heavy">Heavy (Most Accurate)</option>
-            </select>
-          </div>
+          <!-- 4. Hardware & Camera Device Settings Menu -->
+          <details class="nav-dropdown" id="dropdown-settings">
+            <summary class="nav-dropdown-trigger" title="Camera devices, MediaPipe model, and frame rate settings">
+              <svg class="gear-icon" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4" />
+                <path d="M8 1.5V3M8 13V14.5M1.5 8H3M13 8H14.5M3.4 3.4L4.5 4.5M11.5 11.5L12.6 12.6M12.6 3.4L11.5 4.5M4.5 11.5L3.4 12.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+              </svg>
+              <span>Settings</span>
+              <svg class="chevron-icon" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </summary>
+            <div class="nav-dropdown-panel panel-wide">
+              <div class="dropdown-header-between">
+                <span class="dropdown-section-title">Camera Devices</span>
+                <button
+                  id="refresh-cameras-btn"
+                  class="btn btn-xs"
+                  title="Rescan connected video devices"
+                >
+                  Refresh Devices
+                </button>
+              </div>
 
-          <!-- Target FPS -->
-          <div class="control-group">
-            <label for="fps-select">FPS</label>
-            <select id="fps-select">
-              <option value="60" selected>60 FPS</option>
-              <option value="30">30 FPS</option>
-            </select>
-          </div>
+              <div class="settings-form-stack">
+                <div class="control-group" id="laptop-cam-group">
+                  <label for="laptop-camera-select">Laptop Camera (Face-On Landscape)</label>
+                  <select id="laptop-camera-select" title="Select Laptop Webcam (Landscape)">
+                    <option value="">Detecting...</option>
+                  </select>
+                </div>
 
-          <!-- Handedness Toggle -->
-          <div class="control-group">
-            <label>Golfer</label>
-            <div class="segmented" id="handedness-toggle">
-              <button type="button" class="seg-btn active" data-hand="right">Right</button>
-              <button type="button" class="seg-btn" data-hand="left">Left</button>
+                <div class="control-group" id="phone-cam-group">
+                  <label for="phone-camera-select">Phone Camera (DroidCam Portrait DTL)</label>
+                  <select id="phone-camera-select" title="Select DroidCam / Phone Camera (Portrait)">
+                    <option value="">Detecting...</option>
+                  </select>
+                </div>
+
+                <div class="settings-two-col">
+                  <div class="control-group">
+                    <label for="pose-model-select">Pose Landmarker Model</label>
+                    <select id="pose-model-select" title="MediaPipe PoseLandmarker Model Variant">
+                      <option value="lite">Lite (Fastest)</option>
+                      <option value="full" selected>Full (Balanced)</option>
+                      <option value="heavy">Heavy (Max Precision)</option>
+                    </select>
+                  </div>
+
+                  <div class="control-group">
+                    <label for="fps-select">Target Frame Rate</label>
+                    <select id="fps-select">
+                      <option value="60" selected>60 FPS</option>
+                      <option value="30">30 FPS</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div class="dropdown-rule"></div>
+              <div class="dropdown-section-title">Device Assignment Status</div>
+              <div id="phone-detect-banner" class="banner banner-info">
+                Checking connected video devices...
+              </div>
+              <div class="stats-grid">
+                <div class="stat-box">
+                  <span class="stat-label">Laptop Feed</span>
+                  <span class="stat-val" id="stat-laptop-device">—</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Phone Feed</span>
+                  <span class="stat-val" id="stat-phone-device">—</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Laptop Stream</span>
+                  <span class="stat-val num" id="stat-laptop-fps">—</span>
+                </div>
+                <div class="stat-box">
+                  <span class="stat-label">Phone Stream</span>
+                  <span class="stat-val num" id="stat-phone-fps">—</span>
+                </div>
+              </div>
             </div>
-          </div>
-
-          <!-- Mirror, Skeleton, Club, Guide & Upload Toggles -->
-          <div class="control-group">
-            <label>Overlays &amp; Input</label>
-            <div class="row-inline">
-              <button id="skeleton-btn" class="btn btn-toggle active" title="Toggle MediaPipe 2D Skeleton &amp; DTL Posture Chain">
-                Skeleton: ON
-              </button>
-              <button id="club-track-btn" class="btn btn-toggle active" title="Golf club tracking mode: Auto (tracks physical club if held, or hands-only if empty-handed) / Virtual (projects virtual shaft) / OFF">
-                🏌️ Club: Auto
-              </button>
-              <button id="mirror-btn" class="btn btn-toggle active" title="Flip laptop video horizontally">
-                Mirror: ON
-              </button>
-              <button id="guide-btn" class="btn btn-toggle active" title="Show camera framing guides">
-                Guide: ON
-              </button>
-              <button id="upload-video-btn" class="btn" title="Load a recorded swing video file for testing">
-                📂 Video
-              </button>
-              <button id="toggle-3d-stage-btn" class="btn btn-toggle" title="Expand 3D Swing Replay into Main Stage">🧊 3D Studio</button>
-              <input type="file" id="upload-video-input" accept="video/*" class="hidden" />
-            </div>
-          </div>
+          </details>
         </div>
       </header>
 
-      <!-- Main Workspace -->
+      <!-- Main Two-Column Workbench: Left Stage (Live Cameras OR 3D Rendering Lab) + Right Rail (AI Coach & Swing Metrics) -->
       <main class="workspace">
-        <!-- Left/Main: Live Camera Feed(s) + Framing & Pose Skeleton Overlay -->
-        <section class="video-panel" id="video-panel">
-          <!-- Stage 1: Laptop Front-On (Landscape) -->
-          <div class="video-stage" id="laptop-stage">
-            <div class="video-container landscape-frame" id="laptop-container">
-              <video id="laptop-video" autoplay playsinline muted></video>
-              <canvas id="laptop-canvas"></canvas>
+        <div class="stage-column">
+          <!-- Tab View 1: Live Camera Feed(s) & 2D Biomechanical Overlay -->
+          <section class="video-panel" id="video-panel" aria-label="Live Camera Feeds">
+            <!-- Stage 1: Laptop Front-On (Landscape) -->
+            <div class="video-stage" id="laptop-stage">
+              <div class="video-container landscape-frame" id="laptop-container">
+                <video id="laptop-video" autoplay playsinline muted></video>
+                <canvas id="laptop-canvas"></canvas>
 
-              <div class="hud-top-left">
-                <span class="hud-pill status-pill" id="laptop-status-pill">Connecting...</span>
-                <span class="hud-pill pose-pill" id="pose-status-pill">Pose: Loading...</span>
-                <span class="hud-pill" id="laptop-res-pill">-- × --</span>
-                <span class="hud-pill fps-pill" id="laptop-fps-pill">-- FPS</span>
-              </div>
-
-              <div class="hud-top-right">
-                <div class="target-indicator" id="laptop-target-indicator">
-                  ⬅ Target Direction
+                <div class="hud-top-left">
+                  <span class="hud-pill status-pill" id="laptop-status-pill">Connecting...</span>
+                  <span class="hud-pill pose-pill" id="pose-status-pill">Pose: Loading...</span>
+                  <span class="hud-pill num" id="laptop-res-pill">— × —</span>
+                  <span class="hud-pill fps-pill num" id="laptop-fps-pill">— FPS</span>
                 </div>
-              </div>
 
-              <!-- Live Capture FSM HUD Bar (Visible from 3m away) -->
-              <div class="hud-bottom-bar" id="capture-hud-bar">
-                <div class="hud-fsm-row">
-                  <span class="fsm-badge state-idle" id="hud-fsm-badge">IDLE</span>
-                  <span class="hud-fsm-msg" id="hud-fsm-msg">
-                    Place hands below hips in address posture to begin
-                  </span>
+                <div class="hud-top-right">
+                  <div class="target-indicator" id="laptop-target-indicator">
+                    Target Direction (Lead Side)
+                  </div>
                 </div>
-                <div class="hold-progress-track">
-                  <div class="hold-progress-fill" id="hud-hold-progress"></div>
-                </div>
-              </div>
-            </div>
-          </div>
 
-          <!-- Stage 2: Phone DroidCam Behind-Swing (Portrait, rotated 90° without zoom) -->
-          <div class="video-stage portrait-stage" id="phone-stage">
-            <div class="video-container portrait-frame" id="phone-container">
-              <video id="phone-video" autoplay playsinline muted></video>
-              <canvas id="phone-canvas"></canvas>
-
-              <div class="hud-top-left">
-                <span class="hud-pill status-pill" id="phone-status-pill">Connecting...</span>
-                <span class="hud-pill pose-pill" id="phone-pose-pill">DTL Pose: Loading...</span>
-                <span class="hud-pill fps-pill" id="phone-fps-pill">-- FPS</span>
-              </div>
-
-              <div class="hud-top-right">
-                <button id="phone-rotate-btn" class="hud-btn" title="Flip portrait rotation (+90° / -90°)">
-                  ⟳ 90°
-                </button>
-                <div class="target-indicator">
-                  ⬆ Target
+                <!-- Live Capture FSM HUD Bar -->
+                <div class="hud-bottom-bar" id="capture-hud-bar">
+                  <div class="hud-fsm-row">
+                    <span class="fsm-badge state-idle" id="hud-fsm-badge">IDLE</span>
+                    <span class="hud-fsm-msg" id="hud-fsm-msg">
+                      Address the ball with hands below hips to arm automatic capture
+                    </span>
+                  </div>
+                  <div class="hold-progress-track">
+                    <div class="hold-progress-fill" id="hud-hold-progress"></div>
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </section>
 
-        <!-- Right Sidebar: AI Speech Coach, Swing Capture FSM, Biomechanical Metrics, Phase Detection & Diagnostics -->
+            <!-- Stage 2: Phone DroidCam Down-the-Line (Portrait) -->
+            <div class="video-stage portrait-stage" id="phone-stage">
+              <div class="video-container portrait-frame" id="phone-container">
+                <video id="phone-video" autoplay playsinline muted></video>
+                <canvas id="phone-canvas"></canvas>
+
+                <div class="hud-top-left">
+                  <span class="hud-pill status-pill" id="phone-status-pill">Connecting...</span>
+                  <span class="hud-pill pose-pill" id="phone-pose-pill">DTL Pose: Loading...</span>
+                  <span class="hud-pill fps-pill num" id="phone-fps-pill">— FPS</span>
+                </div>
+
+                <div class="hud-top-right">
+                  <button
+                    id="phone-rotate-btn"
+                    class="hud-btn"
+                    title="Cycle portrait rotation (+90° / -90° / 0°)"
+                  >
+                    Rotate 90°
+                  </button>
+                  <div class="target-indicator">Target Line</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Tab View 2: Interactive 3D Swing Rendering Lab (Full Stage) -->
+          <section
+            class="card replay3d-card hidden"
+            id="replay-3d-card"
+            aria-label="3D Swing Rendering Lab"
+          ></section>
+        </div>
+
+        <!-- Right Rail: AI Speech Coach Transcript + Biomechanical Swing Metrics -->
         <aside class="side-panel">
-          <!-- Card 1: AI Speech Coach & Voice Q&A -->
+          <!-- Panel 1: AI Swing Coach & Transcript -->
           <div class="card coach-card">
             <div class="coach-header">
-              <h2>🎙️ AI Swing Coach</h2>
-              <div class="row-inline">
+              <div class="card-title-group">
+                <h2>AI Swing Coach</h2>
                 <span class="coach-badge" id="coach-source-badge">Checking API...</span>
-                <button id="coach-auto-btn" class="btn btn-xs active" title="Automatically speak coaching immediately after every captured swing">⚡ Auto</button>
-                <button id="coach-mute-btn" class="btn btn-xs" title="Mute / Unmute spoken TTS">🔊 TTS</button>
-                <button id="coach-replay-btn" class="btn btn-xs" title="Replay last spoken feedback">↺</button>
-                <button id="coach-reset-btn" class="btn btn-xs" title="Reset multi-swing coaching session history">Reset</button>
+              </div>
+              <div class="row-inline">
+                <button
+                  id="coach-auto-btn"
+                  class="btn btn-xs active"
+                  title="Automatically speak coaching after every captured swing"
+                >
+                  Auto
+                </button>
+                <button
+                  id="coach-mute-btn"
+                  class="btn btn-xs"
+                  title="Mute or unmute spoken TTS"
+                >
+                  TTS
+                </button>
+                <button
+                  id="coach-replay-btn"
+                  class="btn btn-xs"
+                  title="Replay last spoken feedback"
+                >
+                  Replay
+                </button>
+                <button
+                  id="coach-reset-btn"
+                  class="btn btn-xs"
+                  title="Reset multi-swing coaching session history"
+                >
+                  Reset
+                </button>
+
+                <!-- Pull-down menu for Demo / Simulated Swings -->
+                <details class="inline-dropdown">
+                  <summary class="btn btn-xs" title="Load a preset swing scenario to test 3D replay, metrics, and voice coaching">
+                    Demo Swings ▾
+                  </summary>
+                  <div class="inline-dropdown-menu">
+                    <span class="dropdown-section-title">Simulate Swing Scenario</span>
+                    <button type="button" class="btn btn-sim sim-bad" data-sim="bad">
+                      1. Over-the-Top / Sway (58%)
+                    </button>
+                    <button type="button" class="btn btn-sim sim-mid" data-sim="improved">
+                      2. Improved Plane (75%)
+                    </button>
+                    <button type="button" class="btn btn-sim sim-good" data-sim="pure">
+                      3. Tour Reference (92%)
+                    </button>
+                  </div>
+                </details>
               </div>
             </div>
 
-            <!-- Test Swing Triggers (for testing prompt & demo flow) -->
-            <div class="test-swings-bar">
-              <span class="sub-label">Simulate Swing (Prompt &amp; TTS Test):</span>
-              <div class="test-btn-row">
-                <button type="button" class="btn btn-sim sim-bad" data-sim="bad">
-                  1. Bad (58%)
-                </button>
-                <button type="button" class="btn btn-sim sim-mid" data-sim="improved">
-                  2. Better (75%)
-                </button>
-                <button type="button" class="btn btn-sim sim-good" data-sim="pure">
-                  3. Pure (92%)
-                </button>
+            <!-- Divided KPI Strip: Match Score | Focus Fault | Prescribed Drill -->
+            <div class="coach-kpi-strip" id="coach-metrics-summary">
+              <div class="kpi-cell kpi-lead">
+                <span class="stat-label">Swing Match</span>
+                <span class="score-num num" id="coach-match-score">—</span>
               </div>
-            </div>
-
-            <!-- Active Match Score + Primary Fault + Drill -->
-            <div class="coach-metrics-summary" id="coach-metrics-summary">
-              <div class="score-pill-box">
-                <span class="stat-label">Match</span>
-                <span class="score-num" id="coach-match-score">—</span>
+              <div class="kpi-cell">
+                <span class="stat-label">Focus Fault</span>
+                <span class="fault-tag" id="coach-fault-tag">Awaiting swing</span>
               </div>
-              <div class="fault-drill-box">
-                <div class="fault-row">
-                  <span class="stat-label">Focus Fault:</span>
-                  <span class="fault-tag" id="coach-fault-tag">Waiting for swing...</span>
-                </div>
-                <div class="drill-row">
-                  <span class="stat-label">Drill:</span>
-                  <span class="drill-name" id="coach-drill-name">—</span>
-                </div>
+              <div class="kpi-cell">
+                <span class="stat-label">Prescribed Drill</span>
+                <span class="drill-name" id="coach-drill-name">—</span>
               </div>
             </div>
 
@@ -224,27 +477,27 @@
             <div class="coach-speech-box" id="coach-speech-box">
               <div class="speech-status-line">
                 <span class="status-dot" id="coach-status-dot"></span>
-                <span id="coach-status-text">Ready — trigger a swing or hold Spacebar to ask a question</span>
-                <span class="latency-tag" id="coach-latency-tag"></span>
+                <span id="coach-status-text">Ready — capture a swing or hold Spacebar to ask</span>
+                <span class="latency-tag num" id="coach-latency-tag"></span>
               </div>
               <p class="coach-quote" id="coach-quote">
-                "Step up to the ball, or click one of the simulated swings above to test live voice coaching."
+                "Address the ball to record a live swing, or open Demo Swings above to inspect a sample swing in 2D and 3D."
               </p>
             </div>
 
-            <!-- Push-to-Talk (Spacebar) + Text Q&A Fallback -->
+            <!-- Push-to-Talk (Spacebar) + Text Q&A -->
             <div class="ptt-section">
               <button type="button" id="ptt-btn" class="btn-ptt">
-                🎤 Hold <strong>SPACEBAR</strong> to Ask Coach
+                Hold <strong>Spacebar</strong> to Ask Coach
               </button>
               <div class="transcript-preview" id="stt-transcript-preview">
-                e.g. "How do I fix that?" or "Why does my head movement matter?"
+                Ask about your primary fault, drill feel, or tempo numbers.
               </div>
               <form id="qa-form" class="qa-input-row">
                 <input
                   type="text"
                   id="qa-text-input"
-                  placeholder="Or type a question for the coach..."
+                  placeholder="Ask the coach a follow-up question..."
                   autocomplete="off"
                 />
                 <button type="submit" class="btn btn-accent">Ask</button>
@@ -252,237 +505,169 @@
             </div>
           </div>
 
-          <!-- Interactive Three.js 3D Swing Replay Card (also expands to full stage) -->
-          <div class="card replay3d-card" id="replay-3d-card"></div>
-
-          <!-- Card 2: Swing Capture State Machine & Override Controls -->
-          <div class="card">
+          <!-- Panel 2: Biomechanical Swing Metrics & Fault Ranking -->
+          <div class="card metrics-card">
             <div class="card-header-row">
-              <h2>🎯 Swing Capture FSM</h2>
-              <span class="fsm-badge state-idle" id="sidebar-fsm-badge">IDLE</span>
-            </div>
-
-            <div class="telemetry-grid">
-              <div class="stat-box">
-                <span class="stat-label">Key Visibility</span>
-                <span class="stat-val" id="stat-visibility">—</span>
+              <div class="card-title-group">
+                <h2>Swing Metrics</h2>
+                <!-- Info Tooltip explaining metric normalization -->
+                <details class="info-popover">
+                  <summary class="info-trigger" title="How biomechanical metrics are calculated">
+                    i
+                  </summary>
+                  <div class="info-popover-box">
+                    <strong>Torso-Normalized Biomechanics</strong>
+                    <p>
+                      Linear displacements (head movement, hip sway, weight shift) are scaled to a 50 cm reference torso length so values remain accurate at any camera distance. Rotations blend 3D world landmarks with 2D camera projection.
+                    </p>
+                  </div>
+                </details>
               </div>
-              <div class="stat-box">
-                <span class="stat-label">Hand Speed</span>
-                <span class="stat-val" id="stat-hand-speed">0.00 /s</span>
+              <div class="row-inline">
+                <span class="tempo-pill num" id="tempo-badge">Tempo: —</span>
+                <span class="tempo-pill num" id="metrics-match-badge">Match: —</span>
               </div>
-              <div class="stat-box">
-                <span class="stat-label">Address Posture</span>
-                <span class="stat-val" id="stat-address-check">Waiting</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-label">Captured Frames</span>
-                <span class="stat-val" id="stat-frame-count">0</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-label">Club Tracker (Opt)</span>
-                <span class="stat-val" id="stat-club-status">✋ Hands Only</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-label">DTL Spine / Knee</span>
-                <span class="stat-val" id="stat-dtl-posture">—</span>
-              </div>
-            </div>
-
-            <div class="btn-row-actions">
-              <button id="force-capture-btn" class="btn btn-primary" title="Manual start/stop override for testing in tight spaces">
-                ▶ Force Start Capture
-              </button>
-              <button id="clear-trail-btn" class="btn" title="Clear drawn path &amp; reset FSM">
-                Reset
-              </button>
-            </div>
-
-            <div class="btn-row-actions" style="margin-top: 0.45rem;">
-              <button id="set-reference-btn" class="btn" disabled title="Save last captured swing as data/reference.json">
-                ⭐ Set as Reference
-              </button>
-              <button id="download-json-btn" class="btn" disabled title="Download last captured swing keypoints JSON">
-                ⬇ JSON
-              </button>
-            </div>
-
-            <div id="save-status-banner" class="save-status hidden"></div>
-          </div>
-
-          <!-- Card 3: Biomechanical Metrics & Deterministic Fault Ranking -->
-          <div class="card">
-            <div class="card-header-row">
-              <h2>📐 Biomechanical Metrics (9)</h2>
-              <span class="tempo-pill" id="metrics-match-badge">Match: —</span>
             </div>
 
             <div id="improved-faults-banner" class="improved-banner hidden"></div>
 
+            <!-- Deterministic Fault Ranking -->
             <div class="faults-ranked-section">
-              <span class="sub-label">Ranked Faults (Highest Severity First):</span>
+              <span class="sub-label">Ranked Faults by Severity</span>
               <div id="faults-ranked-list" class="faults-ranked-list">
-                <div class="fault-empty-state">Capture or simulate a swing to compute metrics...</div>
+                <div class="fault-empty-state">No swing recorded in current session.</div>
               </div>
             </div>
 
+            <!-- 9 Biomechanical Metrics Divided Grid -->
             <div class="metrics-grid-9" id="metrics-grid-9">
               <div class="metric-cell" data-metric="tempo_ratio">
                 <div class="metric-cell-top">
                   <span class="metric-name">Tempo Ratio</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-tempo_ratio">—</div>
-                <div class="metric-target">Target ~3.0:1</div>
+                <div class="metric-val num" id="m-val-tempo_ratio">—</div>
+                <div class="metric-target num">Target 3.0:1</div>
               </div>
               <div class="metric-cell" data-metric="lead_arm_deg">
                 <div class="metric-cell-top">
                   <span class="metric-name">Lead Arm (Top)</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-lead_arm_deg">—</div>
-                <div class="metric-target">Target &gt;160°</div>
+                <div class="metric-val num" id="m-val-lead_arm_deg">—</div>
+                <div class="metric-target num">Target &gt;160°</div>
               </div>
               <div class="metric-cell" data-metric="shoulder_turn_deg">
                 <div class="metric-cell-top">
                   <span class="metric-name">Shoulder Turn</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-shoulder_turn_deg">—</div>
-                <div class="metric-target">Target 80–90°</div>
+                <div class="metric-val num" id="m-val-shoulder_turn_deg">—</div>
+                <div class="metric-target num">Target 80–90°</div>
               </div>
               <div class="metric-cell" data-metric="hip_turn_deg">
                 <div class="metric-cell-top">
                   <span class="metric-name">Hip Turn</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-hip_turn_deg">—</div>
-                <div class="metric-target">Target 40–50°</div>
+                <div class="metric-val num" id="m-val-hip_turn_deg">—</div>
+                <div class="metric-target num">Target 40–50°</div>
               </div>
               <div class="metric-cell" data-metric="x_factor_deg">
                 <div class="metric-cell-top">
                   <span class="metric-name">X-Factor</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-x_factor_deg">—</div>
-                <div class="metric-target">Target ~40°</div>
+                <div class="metric-val num" id="m-val-x_factor_deg">—</div>
+                <div class="metric-target num">Target ~40°</div>
               </div>
               <div class="metric-cell" data-metric="spine_angle_change_deg">
                 <div class="metric-cell-top">
-                  <span class="metric-name">Spine Δ (Impact)</span>
+                  <span class="metric-name">Spine Angle Δ</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-spine_angle_change_deg">—</div>
-                <div class="metric-target">Target &lt;5.0°</div>
+                <div class="metric-val num" id="m-val-spine_angle_change_deg">—</div>
+                <div class="metric-target num">Target &lt;5.0°</div>
               </div>
               <div class="metric-cell" data-metric="head_movement_cm">
                 <div class="metric-cell-top">
-                  <span class="metric-name">Head Movement</span>
+                  <span class="metric-name">Head Drift</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-head_movement_cm">—</div>
-                <div class="metric-target">Target &lt;5.0 cm</div>
+                <div class="metric-val num" id="m-val-head_movement_cm">—</div>
+                <div class="metric-target num">Target &lt;5.0 cm</div>
               </div>
               <div class="metric-cell" data-metric="hip_sway_cm">
                 <div class="metric-cell-top">
                   <span class="metric-name">Hip Sway</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-hip_sway_cm">—</div>
-                <div class="metric-target">Target &lt;5.0 cm</div>
+                <div class="metric-val num" id="m-val-hip_sway_cm">—</div>
+                <div class="metric-target num">Target &lt;5.0 cm</div>
               </div>
               <div class="metric-cell" data-metric="weight_shift_cm">
                 <div class="metric-cell-top">
                   <span class="metric-name">Weight Shift</span>
                   <span class="metric-dot"></span>
                 </div>
-                <div class="metric-val" id="m-val-weight_shift_cm">—</div>
-                <div class="metric-target">Target ≥3.0 cm</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Card 4: Detected Swing Phases & Tempo -->
-          <div class="card">
-            <div class="card-header-row">
-              <h2>⏱️ Phase Detection &amp; Tempo</h2>
-              <span class="tempo-pill" id="tempo-badge">Tempo: —</span>
-            </div>
-
-            <div class="phases-table">
-              <div class="phase-row" data-phase="address">
-                <span class="phase-dot dot-address"></span>
-                <span class="phase-name">1. Address</span>
-                <span class="phase-val" id="phase-address">—</span>
-              </div>
-              <div class="phase-row" data-phase="takeaway">
-                <span class="phase-dot dot-takeaway"></span>
-                <span class="phase-name">2. Takeaway</span>
-                <span class="phase-val" id="phase-takeaway">—</span>
-              </div>
-              <div class="phase-row" data-phase="top">
-                <span class="phase-dot dot-top"></span>
-                <span class="phase-name">3. Top of Swing</span>
-                <span class="phase-val" id="phase-top">—</span>
-              </div>
-              <div class="phase-row" data-phase="impact">
-                <span class="phase-dot dot-impact"></span>
-                <span class="phase-name">4. Impact</span>
-                <span class="phase-val" id="phase-impact">—</span>
-              </div>
-              <div class="phase-row" data-phase="finish">
-                <span class="phase-dot dot-finish"></span>
-                <span class="phase-name">5. Finish</span>
-                <span class="phase-val" id="phase-finish">—</span>
+                <div class="metric-val num" id="m-val-weight_shift_cm">—</div>
+                <div class="metric-target num">Target ≥3.0 cm</div>
               </div>
             </div>
 
-            <div class="tempo-breakdown">
-              <div>
-                <span class="stat-label">Backswing</span>
-                <strong id="stat-backswing-ms">— ms</strong>
-              </div>
-              <div>
-                <span class="stat-label">Downswing</span>
-                <strong id="stat-downswing-ms">— ms</strong>
-              </div>
-              <div>
-                <span class="stat-label">Target Ratio</span>
-                <strong>~3.0 : 1</strong>
-              </div>
-            </div>
-          </div>
+            <!-- Pull-Out Drawer for Phase Detection & Tempo Breakdown -->
+            <details class="pullout-drawer">
+              <summary class="pullout-summary">
+                <span>Phase Timing &amp; Tempo Breakdown</span>
+                <svg class="chevron-icon" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                  <path d="M3 4.5L6 7.5L9 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </summary>
+              <div class="pullout-body">
+                <div class="tempo-breakdown">
+                  <div>
+                    <span class="stat-label">Backswing</span>
+                    <strong class="num" id="stat-backswing-ms">— ms</strong>
+                  </div>
+                  <div>
+                    <span class="stat-label">Downswing</span>
+                    <strong class="num" id="stat-downswing-ms">— ms</strong>
+                  </div>
+                  <div>
+                    <span class="stat-label">Tour Target</span>
+                    <strong class="num">3.0 : 1</strong>
+                  </div>
+                </div>
 
-          <!-- Card 5: Camera Assignment & Framing Checklist -->
-          <div class="card">
-            <h2>📱 Camera Assignment</h2>
-            <div id="phone-detect-banner" class="banner banner-info">
-              Checking connected video devices...
-            </div>
-
-            <div class="stats-grid">
-              <div class="stat-box">
-                <span class="stat-label">Laptop Feed</span>
-                <span class="stat-val" id="stat-laptop-device">—</span>
+                <div class="phases-table">
+                  <div class="phase-row" data-phase="address">
+                    <span class="phase-dot dot-address"></span>
+                    <span class="phase-name">1. Address</span>
+                    <span class="phase-val num" id="phase-address">—</span>
+                  </div>
+                  <div class="phase-row" data-phase="takeaway">
+                    <span class="phase-dot dot-takeaway"></span>
+                    <span class="phase-name">2. Takeaway</span>
+                    <span class="phase-val num" id="phase-takeaway">—</span>
+                  </div>
+                  <div class="phase-row" data-phase="top">
+                    <span class="phase-dot dot-top"></span>
+                    <span class="phase-name">3. Top of Swing</span>
+                    <span class="phase-val num" id="phase-top">—</span>
+                  </div>
+                  <div class="phase-row" data-phase="impact">
+                    <span class="phase-dot dot-impact"></span>
+                    <span class="phase-name">4. Impact</span>
+                    <span class="phase-val num" id="phase-impact">—</span>
+                  </div>
+                  <div class="phase-row" data-phase="finish">
+                    <span class="phase-dot dot-finish"></span>
+                    <span class="phase-name">5. Finish</span>
+                    <span class="phase-val num" id="phase-finish">—</span>
+                  </div>
+                </div>
               </div>
-              <div class="stat-box">
-                <span class="stat-label">Phone (DroidCam)</span>
-                <span class="stat-val" id="stat-phone-device">—</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-label">Laptop Res / FPS</span>
-                <span class="stat-val" id="stat-laptop-fps">—</span>
-              </div>
-              <div class="stat-box">
-                <span class="stat-label">Phone Res / FPS</span>
-                <span class="stat-val" id="stat-phone-fps">—</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="card">
-            <h2 id="checklist-title">🎯 Framing Guide Explained</h2>
-            <ul class="checklist" id="checklist-items"></ul>
+            </details>
           </div>
         </aside>
       </main>

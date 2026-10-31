@@ -83,12 +83,15 @@
             </div>
           </div>
 
-          <!-- Mirror, Skeleton, Guide & Upload Toggles -->
+          <!-- Mirror, Skeleton, Club, Guide & Upload Toggles -->
           <div class="control-group">
             <label>Overlays &amp; Input</label>
             <div class="row-inline">
-              <button id="skeleton-btn" class="btn btn-toggle active" title="Toggle MediaPipe 2D Skeleton &amp; Hand Trail">
+              <button id="skeleton-btn" class="btn btn-toggle active" title="Toggle MediaPipe 2D Skeleton &amp; DTL Posture Chain">
                 Skeleton: ON
+              </button>
+              <button id="club-track-btn" class="btn btn-toggle active" title="Golf club tracking mode: Auto (tracks physical club if held, or hands-only if empty-handed) / Virtual (projects virtual shaft) / OFF">
+                🏌️ Club: Auto
               </button>
               <button id="mirror-btn" class="btn btn-toggle active" title="Flip laptop video horizontally">
                 Mirror: ON
@@ -151,7 +154,7 @@
 
               <div class="hud-top-left">
                 <span class="hud-pill status-pill" id="phone-status-pill">Connecting...</span>
-                <span class="hud-pill phone-pill">📱 DroidCam (Portrait)</span>
+                <span class="hud-pill pose-pill" id="phone-pose-pill">DTL Pose: Loading...</span>
                 <span class="hud-pill fps-pill" id="phone-fps-pill">-- FPS</span>
               </div>
 
@@ -269,6 +272,14 @@
               <div class="stat-box">
                 <span class="stat-label">Captured Frames</span>
                 <span class="stat-val" id="stat-frame-count">0</span>
+              </div>
+              <div class="stat-box">
+                <span class="stat-label">Club Tracker (Opt)</span>
+                <span class="stat-val" id="stat-club-status">✋ Hands Only</span>
+              </div>
+              <div class="stat-box">
+                <span class="stat-label">DTL Spine / Knee</span>
+                <span class="stat-val" id="stat-dtl-posture">—</span>
               </div>
             </div>
 

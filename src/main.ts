@@ -663,7 +663,7 @@ function updateViewLayout(): void {
     checklistItems.innerHTML = `
       <li><strong>Address Lock (1.0s):</strong> Stand in front of the Laptop camera with hands below hips for 1s to auto-start recording.</li>
       <li><strong>Deterministic Fault Ranking:</strong> Ranks all 9 metrics by severity and automatically triggers spoken coaching on completion.</li>
-      <li><strong>Manual Override:</strong> Use <strong>Force Start/Stop</strong> in tight spaces.</li>
+      <li><strong>Manual Override:</strong> Use <strong>Force Start/Stop</strong> in tight spaces.</li>`;
     checklistTitle.textContent = '⚡ 90° Dual View (Face-On + DTL)';
     checklistItems.innerHTML = `
       <li><strong>Laptop (Front-On):</strong> Tracks full bilateral body rotation, sway, lead arm, and triggers auto-capture.</li>

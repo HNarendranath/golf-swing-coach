@@ -19,6 +19,23 @@ export interface Landmark {
   visibility: number;
 }
 
+export type ClubTrackingMode = 'auto' | 'virtual' | 'off';
+
+export interface ClubState {
+  /** True when a physical club shaft is visually detected (or virtual mode is enabled) */
+  detected: boolean;
+  /** Whether this club state comes from CV shaft detection or kinematic wrist projection */
+  source: 'cv' | 'virtual' | 'none';
+  /** Detection confidence [0..1] */
+  confidence: number;
+  /** Grip midpoint in normalized [0..1] image coordinates */
+  grip: { x: number; y: number };
+  /** Clubhead position in normalized [0..1] image coordinates */
+  clubhead: { x: number; y: number };
+  /** Shaft angle in degrees relative to horizontal (0-180) */
+  shaftAngleDeg: number;
+}
+
 export interface SwingFrame {
   /** Timestamp in milliseconds relative to recording or performance clock */
   t: number;
@@ -26,6 +43,8 @@ export interface SwingFrame {
   landmarks: Landmark[];
   /** 3D world landmarks in meters, hip-centered by MediaPipe */
   worldLandmarks: Landmark[];
+  /** Optional tracked golf club state for this frame (never required for capture/analysis) */
+  club?: ClubState;
 }
 
 export interface SwingPhases {

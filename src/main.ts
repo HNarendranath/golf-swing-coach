@@ -21,6 +21,8 @@ import { drawPoseSkeletonOverlay } from './visuals/canvasOverlay';
 import { SpeechCoach, MOCK_SWING_SCENARIOS } from './coaching/speechCoach';
 import {
   CoachingPayload,
+  ClubState,
+  ClubTrackingMode,
   Handedness,
   PoseModelVariant,
   SwingFault,
@@ -53,6 +55,7 @@ const refreshCamerasBtn = document.getElementById('refresh-cameras-btn') as HTML
 const poseModelSelect = document.getElementById('pose-model-select') as HTMLSelectElement;
 const fpsSelect = document.getElementById('fps-select') as HTMLSelectElement;
 const skeletonBtn = document.getElementById('skeleton-btn') as HTMLButtonElement;
+const clubTrackBtn = document.getElementById('club-track-btn') as HTMLButtonElement;
 const mirrorBtn = document.getElementById('mirror-btn') as HTMLButtonElement;
 const guideBtn = document.getElementById('guide-btn') as HTMLButtonElement;
 const uploadVideoBtn = document.getElementById('upload-video-btn') as HTMLButtonElement;
@@ -73,6 +76,7 @@ const hudHoldProgress = document.getElementById('hud-hold-progress') as HTMLDivE
 
 // HUD Pills — Phone (DroidCam)
 const phoneStatusPill = document.getElementById('phone-status-pill') as HTMLSpanElement;
+const phonePosePill = document.getElementById('phone-pose-pill') as HTMLSpanElement;
 const phoneFpsPill = document.getElementById('phone-fps-pill') as HTMLSpanElement;
 
 // Sidebar — Swing Capture FSM & Phase Detection
@@ -81,6 +85,8 @@ const statVisibility = document.getElementById('stat-visibility') as HTMLSpanEle
 const statHandSpeed = document.getElementById('stat-hand-speed') as HTMLSpanElement;
 const statAddressCheck = document.getElementById('stat-address-check') as HTMLSpanElement;
 const statFrameCount = document.getElementById('stat-frame-count') as HTMLSpanElement;
+const statClubStatus = document.getElementById('stat-club-status') as HTMLSpanElement;
+const statDtlPosture = document.getElementById('stat-dtl-posture') as HTMLSpanElement;
 const forceCaptureBtn = document.getElementById('force-capture-btn') as HTMLButtonElement;
 const clearTrailBtn = document.getElementById('clear-trail-btn') as HTMLButtonElement;
 const setReferenceBtn = document.getElementById('set-reference-btn') as HTMLButtonElement;
@@ -130,23 +136,29 @@ const sttTranscriptPreview = document.getElementById('stt-transcript-preview') a
 const qaForm = document.getElementById('qa-form') as HTMLFormElement;
 const qaTextInput = document.getElementById('qa-text-input') as HTMLInputElement;
 
-// Dedicated Camera Managers + Core Capture Pipeline (PoseTracker + OneEuroFilter + Capture FSM)
+// Dedicated Camera Managers + Dedicated PoseTrackers (so Face-On and DTL Portrait track simultaneously in Dual View!)
 const laptopCamManager = new CameraManager(laptopVideo);
 const phoneCamManager = new CameraManager(phoneVideo);
-const poseTracker = new PoseTracker(1.2, 0.08, 1.0);
+const laptopPoseTracker = new PoseTracker(1.2, 0.08, 1.0);
+const phonePoseTracker = new PoseTracker(1.2, 0.08, 1.0);
 const captureFSM = new SwingCaptureFSM('right');
 
 let viewMode: ViewMode = 'dual';
 let isMirrored = true;
 let showFramingGuide = true;
 let showSkeleton = true;
+let clubTrackingMode: ClubTrackingMode = 'auto';
 let handedness: Handedness = 'right';
 let phoneRotationDeg: 90 | -90 | 0 = 90;
 let availableDevices: CameraDevice[] = [];
 let currentMeasuredFps = 60;
 
-// Active & last-captured swing state
+// Active & last-captured swing state (Face-On & DTL)
 let liveHandTrail: Point2D[] = [];
+let liveClubTrail: Point2D[] = [];
+let dtlHandTrail: Point2D[] = [];
+let dtlClubTrail: Point2D[] = [];
+let dtlAddressHipX: number | null = null;
 let lastCapturedFrames: SwingFrame[] = [];
 let lastCapturedPhases: SwingPhases | null = null;
 let lastRecording: SwingRecording | null = null;
@@ -369,16 +381,22 @@ coachResetBtn.addEventListener('click', async () => {
 });
 
 /**
- * Initializes MediaPipe PoseLandmarker (`lite`, `full` default, `heavy`).
+ * Initializes both MediaPipe PoseLandmarker instances (`laptopPoseTracker` & `phonePoseTracker`).
  */
-async function initPoseModel(variant: PoseModelVariant): Promise<void> {
+async function initPoseModels(variant: PoseModelVariant): Promise<void> {
   poseStatusPill.textContent = `Pose (${variant}): Loading...`;
+  phonePosePill.textContent = `DTL Pose: Loading...`;
   try {
-    await poseTracker.init(variant);
+    await Promise.all([
+      laptopPoseTracker.init(variant),
+      phonePoseTracker.init(variant),
+    ]);
     poseStatusPill.textContent = `Pose (${variant.toUpperCase()}): Ready`;
+    phonePosePill.textContent = `DTL Pose: Ready`;
   } catch (err) {
     console.error('Failed to initialize MediaPipe PoseLandmarker:', err);
     poseStatusPill.textContent = 'Pose: Load Error';
+    phonePosePill.textContent = 'DTL Pose: Error';
   }
 }
 
@@ -411,6 +429,9 @@ async function loadSavedReference(): Promise<void> {
 captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
   lastCapturedFrames = frames;
   liveHandTrail = [];
+  liveClubTrail = [];
+  dtlHandTrail = [];
+  dtlClubTrail = [];
 
   // 1. Run Phase Detection (Address, Takeaway, Top, Impact, Finish)
   const phases = detectSwingPhases(frames, handedness);
@@ -516,9 +537,13 @@ captureFSM.onSwingComplete(async (frames: SwingFrame[]) => {
 });
 
 /**
- * Updates HUD and Sidebar telemetry from the SwingCaptureFSM.
+ * Updates HUD and Sidebar telemetry from the SwingCaptureFSM and optional ClubTracker.
  */
-function updateCaptureUI(telemetry: CaptureTelemetry, keyVisibility: number): void {
+function updateCaptureUI(
+  telemetry: CaptureTelemetry,
+  keyVisibility: number,
+  club?: ClubState
+): void {
   const stateClass = `fsm-badge state-${telemetry.state.toLowerCase()}`;
   hudFsmBadge.className = stateClass;
   hudFsmBadge.textContent = telemetry.state.replace('_', ' ');
@@ -549,7 +574,27 @@ function updateCaptureUI(telemetry: CaptureTelemetry, keyVisibility: number): vo
       ? `${telemetry.recordedFrames}`
       : `${lastCapturedFrames.length}`;
 
+  if (club) {
+    updateClubTelemetryUI(club);
+  }
+
   updateForceButtonUI(telemetry.state);
+}
+
+function updateClubTelemetryUI(club: ClubState): void {
+  if (clubTrackingMode === 'off') {
+    statClubStatus.textContent = 'OFF (Hands Only)';
+    statClubStatus.style.color = '#94a3b8';
+  } else if (club.detected && club.source === 'cv') {
+    statClubStatus.textContent = `🏌️ Club ${club.shaftAngleDeg}°`;
+    statClubStatus.style.color = '#f0abfc';
+  } else if (club.detected && club.source === 'virtual') {
+    statClubStatus.textContent = `✨ Virtual ${club.shaftAngleDeg}°`;
+    statClubStatus.style.color = '#c4b5fd';
+  } else {
+    statClubStatus.textContent = '✋ Hands Only';
+    statClubStatus.style.color = '#38bdf8';
+  }
 }
 
 function updateForceButtonUI(state: string): void {
@@ -603,12 +648,15 @@ function updateViewLayout(): void {
       <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s until the beep locks address.</li>
       <li><strong>9 Biomechanical Metrics:</strong> Head movement, hip sway &amp; weight shift anchored in cm (torso=50cm); rotations &amp; lead arm angle blended in 3D+2D.</li>
       <li><strong>Auto Voice Coaching:</strong> Speaks personalized Gemini feedback immediately after finish.</li>
+      <li><strong>Bilateral Skeleton:</strong> Tracks shoulders, hips, lead arm angle, head stability, and lateral sway.</li>
+      <li><strong>Optional Club Tracking:</strong> Automatically tracks your golf club shaft &amp; clubhead when held, or works hands-only without a club.</li>
+      <li><strong>Address Trigger:</strong> Hold wrists below hips steady for ~1.0s to auto-start capture.</li>
     `;
   } else if (viewMode === 'dtl') {
-    checklistTitle.textContent = '📱 Phone DroidCam (Portrait)';
+    checklistTitle.textContent = '📱 Phone DroidCam (Portrait DTL)';
     checklistItems.innerHTML = `
-      <li><strong>Full Uncropped Portrait:</strong> Rotated 90° with exact swapped dimensions so zero pixels are cropped or zoomed.</li>
-      <li><strong>Tush Line &amp; Plane:</strong> Tracks swing plane and hip depth wall.</li>
+      <li><strong>Side-Profile Posture Chain:</strong> Tracks <em>Spine Tilt (°)</em>, <em>Knee Flex (°)</em>, <em>Dynamic Tush Line</em>, and <em>Arm/Hand Plane Slot</em>.</li>
+      <li><strong>Optional Club Plane:</strong> Tracks shaft plane angle &amp; clubhead arc when holding a club (not required).</li>
     `;
   } else {
     checklistTitle.textContent = '⚡ 90° Dual View + Auto AI Coach';
@@ -616,6 +664,11 @@ function updateViewLayout(): void {
       <li><strong>Address Lock (1.0s):</strong> Stand in front of the Laptop camera with hands below hips for 1s to auto-start recording.</li>
       <li><strong>Deterministic Fault Ranking:</strong> Ranks all 9 metrics by severity and automatically triggers spoken coaching on completion.</li>
       <li><strong>Manual Override:</strong> Use <strong>Force Start/Stop</strong> in tight spaces.</li>
+    checklistTitle.textContent = '⚡ 90° Dual View (Face-On + DTL)';
+    checklistItems.innerHTML = `
+      <li><strong>Laptop (Front-On):</strong> Tracks full bilateral body rotation, sway, lead arm, and triggers auto-capture.</li>
+      <li><strong>Phone (Portrait DTL):</strong> Simultaneously tracks side-profile <em>Spine Tilt</em>, <em>Knee Flex</em>, <em>Tush Line</em>, and <em>Swing Plane</em>.</li>
+      <li><strong>Golf Club (Optional):</strong> Tracks club shaft &amp; clubhead arc automatically if held; works 100% hands-only if swinging without a club.</li>
     `;
   }
 
@@ -725,8 +778,8 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   // 1. Target Line on ground
   const targetVanishX = xCoord(0.73);
   const targetVanishY = h * 0.24;
-  context.strokeStyle = 'rgba(59, 130, 246, 0.65)';
-  context.lineWidth = 2;
+  context.strokeStyle = 'rgba(59, 130, 246, 0.55)';
+  context.lineWidth = 1.8;
   context.setLineDash([6, 4]);
   context.beginPath();
   context.moveTo(ballX, h * 0.93);
@@ -744,9 +797,9 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.fill();
   context.fillText('BALL', ballX + (flip ? 10 : -10), ballY + 4);
 
-  // 2. Tush Line
-  context.strokeStyle = 'rgba(16, 185, 129, 0.85)';
-  context.lineWidth = 2;
+  // 2. Static Guide Tush Line (subtle when live skeleton is active)
+  context.strokeStyle = 'rgba(16, 185, 129, 0.45)';
+  context.lineWidth = 1.5;
   context.setLineDash([5, 4]);
   context.beginPath();
   context.moveTo(hipX, h * 0.34);
@@ -754,32 +807,29 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.stroke();
 
   context.setLineDash([]);
-  context.fillStyle = '#6ee7b7';
+  context.fillStyle = 'rgba(110, 231, 183, 0.75)';
   context.textAlign = flip ? 'right' : 'left';
   context.fillText('TUSH LINE', hipX + (flip ? -6 : 6), h * 0.33);
 
-  // 3. Spine Tilt Line
-  context.strokeStyle = 'rgba(59, 130, 246, 0.9)';
-  context.lineWidth = 3;
+  // 3. Static Guide Spine Tilt Line
+  context.strokeStyle = 'rgba(59, 130, 246, 0.4)';
+  context.lineWidth = 2;
   context.beginPath();
   context.moveTo(hipX, hipY);
   context.lineTo(shoulderX, shoulderY);
   context.stroke();
 
-  context.fillStyle = '#93c5fd';
-  context.fillText('SPINE (~40°)', shoulderX + (flip ? -65 : 6), shoulderY - 6);
-
   // 4. Swing Plane Corridor
   const planeTopX = xCoord(0.18);
   const planeTopY = h * 0.14;
-  context.strokeStyle = 'rgba(245, 158, 11, 0.85)';
+  context.strokeStyle = 'rgba(245, 158, 11, 0.75)';
   context.lineWidth = 2;
   context.beginPath();
   context.moveTo(ballX, ballY);
   context.lineTo(planeTopX, planeTopY);
   context.stroke();
 
-  context.strokeStyle = 'rgba(245, 158, 11, 0.45)';
+  context.strokeStyle = 'rgba(245, 158, 11, 0.38)';
   context.setLineDash([5, 5]);
   context.beginPath();
   context.moveTo(ballX, ballY - 26);
@@ -790,7 +840,7 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.fillStyle = '#fde68a';
   context.fillText('SWING PLANE', planeTopX + (flip ? -70 : 6), planeTopY - 6);
 
-  context.strokeStyle = 'rgba(245, 158, 11, 0.8)';
+  context.strokeStyle = 'rgba(245, 158, 11, 0.55)';
   context.strokeRect(handsX - 22, handsY - 18, 44, 36);
   context.textAlign = 'center';
   context.fillText('HANDS', handsX, handsY + 30);
@@ -896,20 +946,20 @@ async function syncActiveStreams(): Promise<void> {
 }
 
 /**
- * Runs MediaPipe Pose detection + One Euro Filter + SwingCaptureFSM on the primary active video stream.
+ * Runs Face-On MediaPipe Pose + Optional Club Tracker + SwingCaptureFSM on the Laptop stream.
  */
-function processPoseOnFrame(
+function processLaptopPoseOnFrame(
   video: HTMLVideoElement,
   canvas: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D,
   timestampMs: number,
-  mirrored: boolean,
-  rotationDeg: 0 | 90 | -90
+  mirrored: boolean
 ): void {
-  const detection = poseTracker.detect(video, timestampMs, rotationDeg);
+  const detection = laptopPoseTracker.detect(video, timestampMs, 0, 'face-on');
   if (!detection) {
     if (showSkeleton && lastCapturedFrames.length > 0) {
       drawPoseSkeletonOverlay(canvas, ctx, null, {
+        perspective: 'face-on',
         mirrored,
         capturedFrames: lastCapturedFrames,
         capturedPhases: lastCapturedPhases,
@@ -919,26 +969,119 @@ function processPoseOnFrame(
     return;
   }
 
-  const { frame, isReliable, keyVisibility } = detection;
+  const { frame, isReliable, keyVisibility, club } = detection;
   const telemetry = captureFSM.update(frame, isReliable);
-  updateCaptureUI(telemetry, keyVisibility);
+  updateCaptureUI(telemetry, keyVisibility, club);
 
-  // Track live hand trail while recording
   if (telemetry.state === 'RECORDING' || telemetry.state === 'FOLLOW_THROUGH') {
     liveHandTrail.push(getHandMidpoint2D(frame.landmarks));
     if (liveHandTrail.length > 180) liveHandTrail.shift();
+
+    if (club.detected) {
+      liveClubTrail.push({ ...club.clubhead });
+      if (liveClubTrail.length > 180) liveClubTrail.shift();
+    }
   } else if (telemetry.state === 'IDLE') {
     liveHandTrail = [];
+    liveClubTrail = [];
   }
 
   if (showSkeleton) {
     drawPoseSkeletonOverlay(canvas, ctx, frame.landmarks, {
+      perspective: 'face-on',
       mirrored,
       isReliable,
       liveHandTrail,
+      liveClubTrail,
+      club,
       capturedFrames: lastCapturedFrames,
       capturedPhases: lastCapturedPhases,
       referenceHandPath,
+    });
+  }
+}
+
+/**
+ * Runs Down-The-Line (Portrait Phone) Side-Profile Pose + Posture Chain + Optional Club Tracker.
+ * Runs in BOTH Dual View and DTL-only View!
+ */
+function processPhoneDtlPoseOnFrame(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D,
+  timestampMs: number,
+  rotationDeg: 0 | 90 | -90,
+  drivesCaptureFSM: boolean
+): void {
+  const detection = phonePoseTracker.detect(video, timestampMs, rotationDeg, 'dtl');
+  if (!detection) {
+    phonePosePill.textContent = 'DTL: Searching for golfer...';
+    return;
+  }
+
+  const { frame, isReliable, keyVisibility, club, dtlMetrics } = detection;
+
+  // Update DTL HUD & Sidebar posture readouts
+  if (dtlMetrics) {
+    const clubLabel = club.detected ? ` | 🏌️ ${club.shaftAngleDeg}°` : '';
+    phonePosePill.textContent = `Spine ${dtlMetrics.spineTiltDeg}° | Knee ${dtlMetrics.kneeFlexDeg}°${clubLabel}`;
+    statDtlPosture.textContent = `Spine ${dtlMetrics.spineTiltDeg}° / Knee ${dtlMetrics.kneeFlexDeg}°`;
+    statDtlPosture.style.color =
+      dtlMetrics.spineTiltDeg >= 25 && dtlMetrics.spineTiltDeg <= 52 ? '#38bdf8' : '#fbbf24';
+  }
+
+  let fsmState = captureFSM.getState();
+
+  // If in DTL-only view mode, the phone camera also drives the SwingCaptureFSM
+  if (drivesCaptureFSM) {
+    const telemetry = captureFSM.update(frame, isReliable);
+    fsmState = telemetry.state;
+    updateCaptureUI(telemetry, keyVisibility, club);
+  } else if (club.detected) {
+    // In Dual View, if the phone camera detects the club clearly, show it in the sidebar too
+    updateClubTelemetryUI(club);
+  }
+
+  // Lock reference Tush Line hip X at address
+  if (fsmState === 'ADDRESS_HOLD' && dtlMetrics) {
+    dtlAddressHipX = dtlMetrics.hipRearX;
+  } else if (fsmState === 'IDLE' && dtlMetrics) {
+    dtlAddressHipX = dtlMetrics.hipRearX;
+  }
+
+  // Maintain a rolling DTL hand & club plane trail so you can see the swing plane arc on the phone
+  const handPt = getHandMidpoint2D(frame.landmarks);
+  if (fsmState === 'RECORDING' || fsmState === 'FOLLOW_THROUGH') {
+    dtlHandTrail.push(handPt);
+    if (dtlHandTrail.length > 160) dtlHandTrail.shift();
+    if (club.detected) {
+      dtlClubTrail.push({ ...club.clubhead });
+      if (dtlClubTrail.length > 160) dtlClubTrail.shift();
+    }
+  } else {
+    // Keep a short 25-frame live plane ribbon in IDLE/ADDRESS so DTL plane tracking is immediately visible
+    dtlHandTrail.push(handPt);
+    if (dtlHandTrail.length > 25) dtlHandTrail.shift();
+    if (club.detected) {
+      dtlClubTrail.push({ ...club.clubhead });
+      if (dtlClubTrail.length > 25) dtlClubTrail.shift();
+    } else {
+      dtlClubTrail = [];
+    }
+  }
+
+  if (showSkeleton) {
+    drawPoseSkeletonOverlay(canvas, ctx, frame.landmarks, {
+      perspective: 'dtl',
+      mirrored: false,
+      isReliable,
+      liveHandTrail: dtlHandTrail,
+      liveClubTrail: dtlClubTrail,
+      club,
+      dtlMetrics,
+      addressHipX: dtlAddressHipX,
+      capturedFrames: drivesCaptureFSM ? lastCapturedFrames : undefined,
+      capturedPhases: drivesCaptureFSM ? lastCapturedPhases : null,
     });
   }
 }
@@ -955,9 +1098,8 @@ laptopCamManager.onFrame((video, timestampMs, measuredFps) => {
   }
   drawFaceOnGuide(laptopCanvas, laptopCtx);
 
-  // When Laptop is visible (Face-On or Dual mode), it drives the primary Pose + Capture pipeline
   if (viewMode === 'face-on' || viewMode === 'dual') {
-    processPoseOnFrame(video, laptopCanvas, laptopCtx, timestampMs, isMirrored, 0);
+    processLaptopPoseOnFrame(video, laptopCanvas, laptopCtx, timestampMs, isMirrored);
   }
 });
 
@@ -971,10 +1113,19 @@ phoneCamManager.onFrame((video, timestampMs, measuredFps) => {
   syncPhonePortraitRotation();
   drawDownTheLineGuide(phoneCanvas, phoneCtx);
 
-  // When in DTL-only mode, run Pose + Capture on the rotated portrait phone stream
-  if (viewMode === 'dtl') {
-    currentMeasuredFps = measuredFps || 60;
-    processPoseOnFrame(video, phoneCanvas, phoneCtx, timestampMs, false, phoneRotationDeg);
+  // Run DTL side-profile posture & optional club tracking in BOTH 'dtl' and 'dual' modes!
+  if (viewMode === 'dtl' || viewMode === 'dual') {
+    if (viewMode === 'dtl') {
+      currentMeasuredFps = measuredFps || 60;
+    }
+    processPhoneDtlPoseOnFrame(
+      video,
+      phoneCanvas,
+      phoneCtx,
+      timestampMs,
+      phoneRotationDeg,
+      viewMode === 'dtl'
+    );
   }
 });
 
@@ -984,6 +1135,7 @@ phoneRotateBtn.addEventListener('click', () => {
   else phoneRotationDeg = 90;
 
   phoneRotateBtn.textContent = `⟳ ${phoneRotationDeg}°`;
+  phonePoseTracker.resetFilter();
   syncPhonePortraitRotation();
 });
 
@@ -997,7 +1149,8 @@ angleToggle.addEventListener('click', (e) => {
   angleToggle.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
   btn.classList.add('active');
 
-  poseTracker.resetFilter();
+  laptopPoseTracker.resetFilter();
+  phonePoseTracker.resetFilter();
   updateViewLayout();
   syncActiveStreams();
 });
@@ -1016,7 +1169,7 @@ refreshCamerasBtn.addEventListener('click', () => {
 
 poseModelSelect.addEventListener('change', () => {
   const variant = (poseModelSelect.value as PoseModelVariant) || 'full';
-  initPoseModel(variant);
+  initPoseModels(variant);
 });
 
 fpsSelect.addEventListener('change', () => {
@@ -1028,6 +1181,27 @@ skeletonBtn.addEventListener('click', () => {
   skeletonBtn.classList.toggle('active', showSkeleton);
   skeletonBtn.textContent = `Skeleton: ${showSkeleton ? 'ON' : 'OFF'}`;
   redrawOverlays();
+});
+
+clubTrackBtn.addEventListener('click', () => {
+  if (clubTrackingMode === 'auto') {
+    clubTrackingMode = 'virtual';
+    clubTrackBtn.textContent = '✨ Club: Virtual';
+    clubTrackBtn.classList.add('active');
+  } else if (clubTrackingMode === 'virtual') {
+    clubTrackingMode = 'off';
+    clubTrackBtn.textContent = '✋ Club: OFF';
+    clubTrackBtn.classList.remove('active');
+  } else {
+    clubTrackingMode = 'auto';
+    clubTrackBtn.textContent = '🏌️ Club: Auto';
+    clubTrackBtn.classList.add('active');
+  }
+
+  laptopPoseTracker.setClubTrackingMode(clubTrackingMode);
+  phonePoseTracker.setClubTrackingMode(clubTrackingMode);
+  liveClubTrail = [];
+  dtlClubTrail = [];
 });
 
 mirrorBtn.addEventListener('click', () => {
@@ -1053,7 +1227,7 @@ uploadVideoInput.addEventListener('change', async () => {
   const file = uploadVideoInput.files?.[0];
   if (!file) return;
   try {
-    poseTracker.resetFilter();
+    laptopPoseTracker.resetFilter();
     captureFSM.reset();
     // Unmirror uploaded video files by default so coordinates match natural playback
     isMirrored = false;
@@ -1090,6 +1264,9 @@ forceCaptureBtn.addEventListener('click', () => {
     captureFSM.forceStop();
   } else {
     liveHandTrail = [];
+    liveClubTrail = [];
+    dtlHandTrail = [];
+    dtlClubTrail = [];
     captureFSM.forceStart();
     updateForceButtonUI('RECORDING');
   }
@@ -1098,6 +1275,9 @@ forceCaptureBtn.addEventListener('click', () => {
 clearTrailBtn.addEventListener('click', () => {
   captureFSM.reset();
   liveHandTrail = [];
+  liveClubTrail = [];
+  dtlHandTrail = [];
+  dtlClubTrail = [];
   lastCapturedFrames = [];
   lastCapturedPhases = null;
   saveStatusBanner.classList.add('hidden');
@@ -1145,7 +1325,7 @@ window.addEventListener('resize', () => {
 
 // Initialize on load
 updateViewLayout();
-initPoseModel('full');
+initPoseModels('full');
 loadSavedReference();
 populateCameras(true);
 checkBackendHealth();

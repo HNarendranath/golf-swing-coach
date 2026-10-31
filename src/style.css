@@ -932,3 +932,193 @@ select:hover,
   color: #cbd5e1;
   line-height: 1.4;
 }
+
+
+/* ── Step 3: Biomechanical Metrics & Fault Ranking Card ───────────────────── */
+.improved-banner {
+  margin-bottom: 0.55rem;
+  padding: 0.42rem 0.65rem;
+  border-radius: 7px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #6ee7b7;
+}
+
+.faults-ranked-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.faults-ranked-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.32rem;
+}
+
+.fault-empty-state {
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  background: #0b1120;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  padding: 0.45rem 0.6rem;
+  text-align: center;
+}
+
+.fault-clean-state {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 7px;
+  padding: 0.45rem 0.6rem;
+  text-align: center;
+}
+
+.fault-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  background: #0b1120;
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  border-radius: 7px;
+  padding: 0.36rem 0.55rem;
+  font-size: 0.75rem;
+}
+
+.fault-item-row.primary-fault {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.55);
+}
+
+.fault-rank-badge {
+  font-size: 0.66rem;
+  font-weight: 800;
+  padding: 0.1rem 0.38rem;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.22);
+  color: #fca5a5;
+  flex-shrink: 0;
+}
+
+.fault-item-row.primary-fault .fault-rank-badge {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.fault-item-title {
+  font-weight: 600;
+  color: #f1f5f9;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fault-item-vals {
+  font-size: 0.71rem;
+  font-variant-numeric: tabular-nums;
+  color: #fca5a5;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.metrics-grid-9 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.38rem;
+}
+
+.metric-cell {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.4rem 0.48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.metric-cell.status-good {
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.metric-cell.status-warn {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.metric-cell.status-bad {
+  border-color: rgba(239, 68, 68, 0.55);
+  background: rgba(239, 68, 68, 0.07);
+}
+
+.metric-cell-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.25rem;
+}
+
+.metric-name {
+  font-size: 0.64rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #475569;
+  flex-shrink: 0;
+}
+
+.metric-cell.status-good .metric-dot {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);
+}
+
+.metric-cell.status-warn .metric-dot {
+  background: #f59e0b;
+}
+
+.metric-cell.status-bad .metric-dot {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+}
+
+.metric-val {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-cell.status-good .metric-val {
+  color: #6ee7b7;
+}
+
+.metric-cell.status-warn .metric-val {
+  color: #fcd34d;
+}
+
+.metric-cell.status-bad .metric-val {
+  color: #fca5a5;
+}
+
+.metric-target {
+  font-size: 0.62rem;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}

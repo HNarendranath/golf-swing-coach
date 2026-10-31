@@ -2,127 +2,130 @@ import './style.css';
 import { CameraManager, CameraDevice } from './capture/cameraManager';
 import { Handedness } from './types';
 
-type CameraAngleMode = 'face-on' | 'dtl' | 'dual';
+type ViewMode = 'face-on' | 'dtl' | 'dual';
 
-// UI Elements
-const videoPanel = document.getElementById('video-panel') as HTMLElement;
-const videoEl = document.getElementById('webcam-video') as HTMLVideoElement;
-const canvasEl = document.getElementById('overlay-canvas') as HTMLCanvasElement;
-const ctx = canvasEl.getContext('2d')!;
+// Stages & Video Elements (strictly separated: Laptop vs Phone/DroidCam)
+const laptopStage = document.getElementById('laptop-stage') as HTMLDivElement;
+const laptopVideo = document.getElementById('laptop-video') as HTMLVideoElement;
+const laptopCanvas = document.getElementById('laptop-canvas') as HTMLCanvasElement;
+const laptopCtx = laptopCanvas.getContext('2d')!;
 
-const videoContainerDtl = document.getElementById('video-container-dtl') as HTMLDivElement;
-const videoElDtl = document.getElementById('webcam-video-dtl') as HTMLVideoElement;
-const canvasElDtl = document.getElementById('overlay-canvas-dtl') as HTMLCanvasElement;
-const ctxDtl = canvasElDtl.getContext('2d')!;
+const phoneStage = document.getElementById('phone-stage') as HTMLDivElement;
+const phoneContainer = document.getElementById('phone-container') as HTMLDivElement;
+const phoneVideo = document.getElementById('phone-video') as HTMLVideoElement;
+const phoneCanvas = document.getElementById('phone-canvas') as HTMLCanvasElement;
+const phoneCtx = phoneCanvas.getContext('2d')!;
+const phoneRotateBtn = document.getElementById('phone-rotate-btn') as HTMLButtonElement;
 
+// Top Bar Controls
 const angleToggle = document.getElementById('angle-toggle') as HTMLDivElement;
-const primaryCamLabel = document.getElementById('primary-cam-label') as HTMLLabelElement;
-const secondaryCamGroup = document.getElementById('secondary-cam-group') as HTMLDivElement;
-const cameraSelect = document.getElementById('camera-select') as HTMLSelectElement;
-const cameraSelectDtl = document.getElementById('camera-select-dtl') as HTMLSelectElement;
+const laptopCameraSelect = document.getElementById('laptop-camera-select') as HTMLSelectElement;
+const phoneCameraSelect = document.getElementById('phone-camera-select') as HTMLSelectElement;
 const refreshCamerasBtn = document.getElementById('refresh-cameras-btn') as HTMLButtonElement;
 const fpsSelect = document.getElementById('fps-select') as HTMLSelectElement;
 const mirrorBtn = document.getElementById('mirror-btn') as HTMLButtonElement;
 const guideBtn = document.getElementById('guide-btn') as HTMLButtonElement;
-const videoUpload = document.getElementById('video-upload') as HTMLInputElement;
 const handednessToggle = document.getElementById('handedness-toggle') as HTMLDivElement;
 
-const camStatusPill = document.getElementById('cam-status-pill') as HTMLSpanElement;
-const camAnglePill = document.getElementById('cam-angle-pill') as HTMLSpanElement;
-const camResPill = document.getElementById('cam-res-pill') as HTMLSpanElement;
-const camFpsPill = document.getElementById('cam-fps-pill') as HTMLSpanElement;
-const targetIndicator = document.getElementById('target-indicator') as HTMLDivElement;
+// HUD Pills — Laptop
+const laptopStatusPill = document.getElementById('laptop-status-pill') as HTMLSpanElement;
+const laptopResPill = document.getElementById('laptop-res-pill') as HTMLSpanElement;
+const laptopFpsPill = document.getElementById('laptop-fps-pill') as HTMLSpanElement;
+const laptopTargetIndicator = document.getElementById('laptop-target-indicator') as HTMLDivElement;
 
+// HUD Pills — Phone (DroidCam)
+const phoneStatusPill = document.getElementById('phone-status-pill') as HTMLSpanElement;
+const phoneFpsPill = document.getElementById('phone-fps-pill') as HTMLSpanElement;
+
+// Sidebar Diagnostics
 const phoneDetectBanner = document.getElementById('phone-detect-banner') as HTMLDivElement;
-const statDevice = document.getElementById('stat-device') as HTMLSpanElement;
-const statRes = document.getElementById('stat-res') as HTMLSpanElement;
-const statFps = document.getElementById('stat-fps') as HTMLSpanElement;
-const statAngle = document.getElementById('stat-angle') as HTMLSpanElement;
+const statLaptopDevice = document.getElementById('stat-laptop-device') as HTMLSpanElement;
+const statPhoneDevice = document.getElementById('stat-phone-device') as HTMLSpanElement;
+const statLaptopFps = document.getElementById('stat-laptop-fps') as HTMLSpanElement;
+const statPhoneFps = document.getElementById('stat-phone-fps') as HTMLSpanElement;
 const checklistTitle = document.getElementById('checklist-title') as HTMLHeadingElement;
 const checklistItems = document.getElementById('checklist-items') as HTMLUListElement;
 
-// App State
-const primaryCamManager = new CameraManager(videoEl);
-const dtlCamManager = new CameraManager(videoElDtl);
+// Dedicated Camera Managers
+const laptopCamManager = new CameraManager(laptopVideo);
+const phoneCamManager = new CameraManager(phoneVideo);
 
-let angleMode: CameraAngleMode = 'face-on';
+let viewMode: ViewMode = 'dual';
 let isMirrored = true;
 let showFramingGuide = true;
 let handedness: Handedness = 'right';
+let phoneRotationDeg: 90 | -90 | 0 = 90; // Default 90deg clockwise so 640x480 DroidCam is upright 480x640 portrait
 let availableDevices: CameraDevice[] = [];
 
-videoEl.classList.toggle('mirrored', isMirrored);
+laptopVideo.classList.toggle('mirrored', isMirrored);
 
 /**
- * Updates the UI labels, target arrows, and sidebar explanation for the active camera angle.
+ * Sizes and rotates the #phone-video inside #phone-container by swapping width & height
+ * before rotating 90deg. This guarantees ZERO zoom, ZERO cropping, and a full portrait frame.
  */
-function updateAngleAndHandUI(): void {
-  if (angleMode === 'face-on') {
-    primaryCamLabel.textContent = 'Laptop Camera (Face-On)';
-    camAnglePill.textContent = '💻 Face-On (Front)';
-    statAngle.textContent = 'Face-On (Front)';
-    secondaryCamGroup.classList.add('hidden');
-    videoContainerDtl.classList.add('hidden');
-    videoPanel.classList.remove('dual-mode');
+function syncPhonePortraitRotation(): void {
+  const rect = phoneContainer.getBoundingClientRect();
+  if (rect.width === 0 || rect.height === 0) return;
 
-    const targetIsLeftOnScreen =
-      (handedness === 'right' && isMirrored) || (handedness === 'left' && !isMirrored);
-    targetIndicator.textContent = targetIsLeftOnScreen
-      ? '⬅ Target Direction (Lead Side)'
-      : 'Target Direction (Lead Side) ➔';
-
-    checklistTitle.textContent = '💻 Face-On Guide (Laptop)';
-    checklistItems.innerHTML = `
-      <li><strong>Head Zone (Blue Circle):</strong> Keep your head inside this circle from takeaway to impact (&lt; 5 cm drift).</li>
-      <li><strong>Hip Level &amp; Sway Corridor (Green):</strong> Tracks lateral hip sway away from target at the top, and weight shift toward target at impact.</li>
-      <li><strong>Address Hands (Amber Box):</strong> Hold hands steady below hips for ~1s to auto-start swing capture.</li>
-    `;
-  } else if (angleMode === 'dtl') {
-    primaryCamLabel.textContent = 'Phone Camera (Behind Swing)';
-    camAnglePill.textContent = '📱 Down-The-Line (90° Behind)';
-    statAngle.textContent = 'Down-The-Line (90°)';
-    secondaryCamGroup.classList.add('hidden');
-    videoContainerDtl.classList.add('hidden');
-    videoPanel.classList.remove('dual-mode');
-
-    // Down-the-line looks straight down the target line into the screen
-    targetIndicator.textContent = '⬆ Target Line (Into Screen)';
-
-    checklistTitle.textContent = '📱 Down-The-Line Guide (Phone)';
-    checklistItems.innerHTML = `
-      <li><strong>Tush Line (Vertical Green Wall):</strong> Glutes touch this line at address. Moving forward toward the ball = <em>Early Extension</em>.</li>
-      <li><strong>Spine Tilt (Blue Angle):</strong> ~35–45° forward tilt from hips to shoulders. Maintain through impact.</li>
-      <li><strong>Swing Plane Corridor (Amber Diagonal):</strong> Club/hands should travel inside this corridor (under = in-to-out draw; over = out-to-in slice).</li>
-      <li><strong>Target Line (Bottom Arrow):</strong> Align phone behind your hands/heels pointing straight at the target.</li>
-    `;
+  if (phoneRotationDeg === 90 || phoneRotationDeg === -90) {
+    // Swap width and height so after a 90-degree rotation it matches the portrait box 1:1
+    phoneVideo.style.width = `${rect.height}px`;
+    phoneVideo.style.height = `${rect.width}px`;
+    phoneVideo.style.transform = `translate(-50%, -50%) rotate(${phoneRotationDeg}deg)`;
   } else {
-    // Dual mode: Left = Laptop Face-On, Right = Phone Down-The-Line
-    primaryCamLabel.textContent = 'Laptop (Face-On)';
-    camAnglePill.textContent = '💻 Face-On (Front)';
-    statAngle.textContent = 'Dual (90° Split)';
-    secondaryCamGroup.classList.remove('hidden');
-    videoContainerDtl.classList.remove('hidden');
-    videoPanel.classList.add('dual-mode');
-
-    const targetIsLeftOnScreen =
-      (handedness === 'right' && isMirrored) || (handedness === 'left' && !isMirrored);
-    targetIndicator.textContent = targetIsLeftOnScreen
-      ? '⬅ Target (Lead Side)'
-      : 'Target (Lead Side) ➔';
-
-    checklistTitle.textContent = '⚡ 90° Dual-Camera Setup';
-    checklistItems.innerHTML = `
-      <li><strong>Left Feed (Laptop Face-On):</strong> Faces your chest for Head Movement, Hip Sway, Turn &amp; Lead Arm.</li>
-      <li><strong>Right Feed (Phone Behind Swing):</strong> 90° perpendicular behind your hands for Spine Angle, Tush Line &amp; Swing Plane.</li>
-    `;
+    phoneVideo.style.width = `${rect.width}px`;
+    phoneVideo.style.height = `${rect.height}px`;
+    phoneVideo.style.transform = `translate(-50%, -50%) rotate(0deg)`;
   }
-
-  redrawOverlays();
 }
 
 /**
- * Face-On (Front-On Laptop) Framing Guide:
- * Symmetric chest view with Head stability box, Hip sway corridor, and Address hands trigger box.
+ * Updates which stage(s) are visible and refreshes the sidebar explanation.
+ */
+function updateViewLayout(): void {
+  const showLaptop = viewMode === 'face-on' || viewMode === 'dual';
+  const showPhone = viewMode === 'dtl' || viewMode === 'dual';
+
+  laptopStage.classList.toggle('hidden', !showLaptop);
+  phoneStage.classList.toggle('hidden', !showPhone);
+
+  const targetIsLeftOnScreen =
+    (handedness === 'right' && isMirrored) || (handedness === 'left' && !isMirrored);
+  laptopTargetIndicator.textContent = targetIsLeftOnScreen
+    ? '⬅ Target Direction (Lead Side)'
+    : 'Target Direction (Lead Side) ➔';
+
+  if (viewMode === 'face-on') {
+    checklistTitle.textContent = '💻 Laptop Face-On (Landscape)';
+    checklistItems.innerHTML = `
+      <li><strong>Head Zone (Blue Circle):</strong> Keep your head inside this circle from takeaway to impact (&lt; 5 cm drift).</li>
+      <li><strong>Hip Sway Corridor (Green):</strong> Wide landscape frame captures lateral hip sway and weight shift toward target.</li>
+      <li><strong>Address Hands (Amber Box):</strong> Hold hands steady below hips for ~1s to auto-start swing capture.</li>
+    `;
+  } else if (viewMode === 'dtl') {
+    checklistTitle.textContent = '📱 Phone DroidCam (Portrait)';
+    checklistItems.innerHTML = `
+      <li><strong>Full Uncropped Portrait:</strong> Rotated 90° with exact swapped dimensions so zero pixels are cropped or zoomed.</li>
+      <li><strong>Tush Line (Green Vertical Wall):</strong> Glutes touch this line at address. Moving forward toward ball = <em>Early Extension</em>.</li>
+      <li><strong>Spine Tilt (Blue Line):</strong> ~35–45° forward tilt from hips to shoulders.</li>
+      <li><strong>Swing Plane Corridor (Amber):</strong> Hands/club travel up &amp; down inside this diagonal slot.</li>
+    `;
+  } else {
+    checklistTitle.textContent = '⚡ 90° Dual View (Laptop + DroidCam)';
+    checklistItems.innerHTML = `
+      <li><strong>Left (Laptop Landscape):</strong> Integrated webcam facing your chest for Head Movement, Hip Sway &amp; Turn.</li>
+      <li><strong>Right (Phone Portrait):</strong> Linked exclusively to <strong>DroidCam</strong> (rotated 90° uncropped) for Swing Plane &amp; Spine Angle.</li>
+    `;
+  }
+
+  requestAnimationFrame(() => {
+    syncPhonePortraitRotation();
+    redrawOverlays();
+  });
+}
+
+/**
+ * Face-On (Landscape Laptop) Framing Guide.
  */
 function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D): void {
   const rect = canvas.getBoundingClientRect();
@@ -132,7 +135,7 @@ function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingCont
   }
 
   context.clearRect(0, 0, canvas.width, canvas.height);
-  if (!showFramingGuide) return;
+  if (!showFramingGuide || canvas.width === 0) return;
 
   const w = canvas.width;
   const h = canvas.height;
@@ -158,7 +161,6 @@ function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingCont
   context.lineTo(cx + swayHalfW * 1.8, hipY);
   context.stroke();
 
-  // Left & Right Hip Sway limit markers
   context.setLineDash([]);
   context.strokeStyle = 'rgba(16, 185, 129, 0.75)';
   context.lineWidth = 2;
@@ -199,8 +201,7 @@ function drawFaceOnGuide(canvas: HTMLCanvasElement, context: CanvasRenderingCont
 }
 
 /**
- * Down-The-Line (Perpendicular Phone Behind Swing) Framing Guide:
- * Side profile view showing Tush Line (hip depth), Spine Tilt angle, Swing Plane corridor, and Target Line.
+ * Down-The-Line (Portrait Phone / DroidCam Behind Swing) Framing Guide.
  */
 function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D): void {
   const rect = canvas.getBoundingClientRect();
@@ -210,66 +211,66 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   }
 
   context.clearRect(0, 0, canvas.width, canvas.height);
-  if (!showFramingGuide) return;
+  if (!showFramingGuide || canvas.width === 0) return;
 
   const w = canvas.width;
   const h = canvas.height;
 
-  // In Down-the-Line view behind a right-handed golfer:
-  // Golfer stands on the left side of the frame, bending toward the ball on the right.
-  // Flip horizontally if left-handed.
+  // Flip horizontally if left-handed
   const flip = handedness === 'left';
   const xCoord = (normX: number) => (flip ? w * (1 - normX) : w * normX);
 
-  const hipX = xCoord(0.34);
-  const hipY = h * 0.54;
-  const shoulderX = xCoord(0.47);
-  const shoulderY = h * 0.30;
-  const ballX = xCoord(0.66);
-  const ballY = h * 0.86;
-  const handsX = xCoord(0.51);
-  const handsY = h * 0.58;
+  const hipX = xCoord(0.24);
+  const hipY = h * 0.56;
+  const shoulderX = xCoord(0.46);
+  const shoulderY = h * 0.37;
+  const ballX = xCoord(0.76);
+  const ballY = h * 0.84;
+  const handsX = xCoord(0.54);
+  const handsY = h * 0.60;
 
   context.save();
-  context.font = '600 11px Inter, system-ui, sans-serif';
+  context.font = '600 10.5px Inter, system-ui, sans-serif';
 
-  // 1. Target Line on ground (from ball straight into the screen)
-  const targetVanishX = xCoord(0.64);
-  const targetVanishY = h * 0.18;
-  context.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+  // 1. Target Line on ground (from ball straight up into screen)
+  const targetVanishX = xCoord(0.73);
+  const targetVanishY = h * 0.24;
+  context.strokeStyle = 'rgba(59, 130, 246, 0.65)';
   context.lineWidth = 2;
-  context.setLineDash([7, 5]);
+  context.setLineDash([6, 4]);
   context.beginPath();
-  context.moveTo(ballX, h * 0.94);
+  context.moveTo(ballX, h * 0.93);
   context.lineTo(targetVanishX, targetVanishY);
   context.stroke();
 
   context.setLineDash([]);
   context.fillStyle = '#93c5fd';
-  context.fillText('⬆ TARGET LINE', targetVanishX + (flip ? -75 : 8), targetVanishY + 14);
+  context.textAlign = flip ? 'left' : 'right';
+  context.fillText('⬆ TARGET LINE', targetVanishX + (flip ? 6 : -6), targetVanishY + 12);
 
   // Ball marker
   context.fillStyle = '#f8fafc';
   context.beginPath();
-  context.arc(ballX, ballY, 6, 0, Math.PI * 2);
+  context.arc(ballX, ballY, 5, 0, Math.PI * 2);
   context.fill();
-  context.fillText('BALL', ballX + (flip ? -36 : 10), ballY + 4);
+  context.fillText('BALL', ballX + (flip ? 10 : -10), ballY + 4);
 
   // 2. Tush Line (Vertical Hip Depth Wall — detects Early Extension)
-  context.strokeStyle = 'rgba(16, 185, 129, 0.8)';
-  context.lineWidth = 2.5;
-  context.setLineDash([6, 4]);
+  context.strokeStyle = 'rgba(16, 185, 129, 0.85)';
+  context.lineWidth = 2;
+  context.setLineDash([5, 4]);
   context.beginPath();
-  context.moveTo(hipX, h * 0.32);
-  context.lineTo(hipX, h * 0.88);
+  context.moveTo(hipX, h * 0.34);
+  context.lineTo(hipX, h * 0.86);
   context.stroke();
 
   context.setLineDash([]);
   context.fillStyle = '#6ee7b7';
-  context.fillText('TUSH LINE (HIP DEPTH)', hipX + (flip ? 8 : -130), h * 0.36);
+  context.textAlign = flip ? 'right' : 'left';
+  context.fillText('TUSH LINE', hipX + (flip ? -6 : 6), h * 0.33);
 
   // 3. Spine Tilt Line (Hip to Shoulder ~40 deg forward bend)
-  context.strokeStyle = 'rgba(59, 130, 246, 0.85)';
+  context.strokeStyle = 'rgba(59, 130, 246, 0.9)';
   context.lineWidth = 3;
   context.beginPath();
   context.moveTo(hipX, hipY);
@@ -277,12 +278,12 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.stroke();
 
   context.fillStyle = '#93c5fd';
-  context.fillText('SPINE ANGLE (~40°)', shoulderX + (flip ? 10 : -115), shoulderY - 8);
+  context.fillText('SPINE (~40°)', shoulderX + (flip ? -65 : 6), shoulderY - 6);
 
-  // 4. Swing Plane Corridor (Ball -> Hands -> Through Shoulder)
-  const planeTopX = xCoord(0.26);
-  const planeTopY = h * 0.16;
-  context.strokeStyle = 'rgba(245, 158, 11, 0.8)';
+  // 4. Swing Plane Corridor (Ball -> Hands -> High Top Apex in Portrait Frame)
+  const planeTopX = xCoord(0.18);
+  const planeTopY = h * 0.14;
+  context.strokeStyle = 'rgba(245, 158, 11, 0.85)';
   context.lineWidth = 2;
   context.beginPath();
   context.moveTo(ballX, ballY);
@@ -290,198 +291,186 @@ function drawDownTheLineGuide(canvas: HTMLCanvasElement, context: CanvasRenderin
   context.stroke();
 
   // Upper parallel bound of swing plane corridor
-  context.strokeStyle = 'rgba(245, 158, 11, 0.4)';
+  context.strokeStyle = 'rgba(245, 158, 11, 0.45)';
   context.setLineDash([5, 5]);
   context.beginPath();
-  context.moveTo(ballX, ballY - 22);
-  context.lineTo(planeTopX + (flip ? -35 : 35), planeTopY - 22);
+  context.moveTo(ballX, ballY - 26);
+  context.lineTo(planeTopX + (flip ? -28 : 28), planeTopY - 24);
   context.stroke();
 
   context.setLineDash([]);
   context.fillStyle = '#fde68a';
-  context.fillText('SWING PLANE CORRIDOR', planeTopX + (flip ? -10 : 10), planeTopY - 6);
+  context.fillText('SWING PLANE', planeTopX + (flip ? -70 : 6), planeTopY - 6);
 
   // 5. Address Hands Box
-  context.strokeStyle = 'rgba(245, 158, 11, 0.75)';
-  context.strokeRect(handsX - 28, handsY - 22, 56, 44);
-  context.fillText('HANDS', handsX - 18, handsY + 36);
+  context.strokeStyle = 'rgba(245, 158, 11, 0.8)';
+  context.strokeRect(handsX - 22, handsY - 18, 44, 36);
+  context.textAlign = 'center';
+  context.fillText('HANDS', handsX, handsY + 30);
 
   context.restore();
 }
 
 function redrawOverlays(): void {
-  if (angleMode === 'face-on') {
-    drawFaceOnGuide(canvasEl, ctx);
-  } else if (angleMode === 'dtl') {
-    drawDownTheLineGuide(canvasEl, ctx);
+  drawFaceOnGuide(laptopCanvas, laptopCtx);
+  drawDownTheLineGuide(phoneCanvas, phoneCtx);
+}
+
+/**
+ * Enumerates cameras and strictly assigns:
+ * - laptopCameraSelect -> non-DroidCam integrated laptop webcam
+ * - phoneCameraSelect  -> DroidCam / phone webcam
+ */
+async function populateCameras(autoStart = true): Promise<void> {
+  availableDevices = await CameraManager.listDevices();
+  laptopCameraSelect.innerHTML = '';
+  phoneCameraSelect.innerHTML = '';
+
+  if (availableDevices.length === 0) {
+    phoneDetectBanner.className = 'banner banner-warn';
+    phoneDetectBanner.textContent =
+      'No cameras detected. Start DroidCam and make sure your laptop webcam is enabled, then click ↻.';
+    return;
+  }
+
+  availableDevices.forEach((device) => {
+    const label = device.isPhoneCam ? `📱 ${device.label}` : `💻 ${device.label}`;
+
+    const optLaptop = document.createElement('option');
+    optLaptop.value = device.deviceId;
+    optLaptop.textContent = label;
+    laptopCameraSelect.appendChild(optLaptop);
+
+    const optPhone = document.createElement('option');
+    optPhone.value = device.deviceId;
+    optPhone.textContent = label;
+    phoneCameraSelect.appendChild(optPhone);
+  });
+
+  const laptopCam = availableDevices.find((d) => !d.isPhoneCam) || availableDevices[0];
+  const phoneCam =
+    availableDevices.find((d) => d.isPhoneCam) ||
+    availableDevices.find((d) => d.deviceId !== laptopCam.deviceId) ||
+    availableDevices[0];
+
+  laptopCameraSelect.value = laptopCam.deviceId;
+  phoneCameraSelect.value = phoneCam.deviceId;
+
+  if (phoneCam.isPhoneCam && !laptopCam.isPhoneCam) {
+    phoneDetectBanner.className = 'banner banner-success';
+    phoneDetectBanner.innerHTML = `<strong>💻 Laptop:</strong> ${laptopCam.label}<br/><strong>📱 Phone (DroidCam):</strong> ${phoneCam.label}`;
   } else {
-    drawFaceOnGuide(canvasEl, ctx);
-    drawDownTheLineGuide(canvasElDtl, ctxDtl);
+    phoneDetectBanner.className = 'banner banner-info';
+    phoneDetectBanner.innerHTML = `<strong>💻 Laptop:</strong> ${laptopCam.label}<br/><strong>📱 Phone:</strong> ${phoneCam.label}`;
+  }
+
+  if (autoStart) {
+    await syncActiveStreams();
   }
 }
 
 /**
- * Enumerates cameras and auto-assigns Laptop webcam vs Phone (DroidCam/Iriun).
+ * Starts/stops the Laptop stream and Phone (DroidCam) stream based on the active ViewMode.
  */
-async function populateCameras(autoStart = true): Promise<void> {
-  availableDevices = await cameraManagerListDevices();
-  cameraSelect.innerHTML = '';
-  cameraSelectDtl.innerHTML = '';
-
-  if (availableDevices.length === 0) {
-    const opt = document.createElement('option');
-    opt.value = '';
-    opt.textContent = 'No camera detected';
-    cameraSelect.appendChild(opt);
-    phoneDetectBanner.className = 'banner banner-warn';
-    phoneDetectBanner.textContent =
-      'No cameras detected. Start DroidCam or Iriun Webcam on your PC & phone, then click ↻.';
-    return;
-  }
-
-  const phoneCam = availableDevices.find((d) => d.isPhoneCam);
-  const laptopCam = availableDevices.find((d) => !d.isPhoneCam) || availableDevices[0];
-
-  availableDevices.forEach((device) => {
-    const label = device.isPhoneCam ? `📱 ${device.label}` : `💻 ${device.label}`;
-    const opt1 = document.createElement('option');
-    opt1.value = device.deviceId;
-    opt1.textContent = label;
-    cameraSelect.appendChild(opt1);
-
-    const opt2 = document.createElement('option');
-    opt2.value = device.deviceId;
-    opt2.textContent = label;
-    cameraSelectDtl.appendChild(opt2);
-  });
-
-  // Smart default assignment based on mode:
-  // Face-On defaults to Laptop webcam; DTL defaults to Phone cam if available
-  if (angleMode === 'dtl' && phoneCam) {
-    cameraSelect.value = phoneCam.deviceId;
-  } else {
-    cameraSelect.value = laptopCam.deviceId;
-  }
-
-  if (phoneCam) {
-    cameraSelectDtl.value = phoneCam.deviceId;
-    phoneDetectBanner.className = 'banner banner-success';
-    phoneDetectBanner.innerHTML = `<strong>Phone Detected (Behind Swing):</strong> ${phoneCam.label}<br/><strong>Laptop (Front-On):</strong> ${laptopCam.label}`;
-  } else if (availableDevices.length > 1) {
-    cameraSelectDtl.value = availableDevices[1].deviceId;
-    phoneDetectBanner.className = 'banner banner-info';
-    phoneDetectBanner.innerHTML = `<strong>${availableDevices.length} Cameras Ready.</strong> Select which is Front-On vs Behind Swing above.`;
-  } else {
-    cameraSelectDtl.value = availableDevices[0].deviceId;
-    phoneDetectBanner.className = 'banner banner-info';
-    phoneDetectBanner.innerHTML = `<strong>1 Camera Connected:</strong> ${availableDevices[0].label}.<br/>Open DroidCam/Iriun and click <strong>↻</strong> to add your phone as the 90° Behind-Swing camera.`;
-  }
-
-  if (autoStart) {
-    await startSelectedCameras();
-  }
-}
-
-async function cameraManagerListDevices(): Promise<CameraDevice[]> {
-  return primaryCamManager.listDevices();
-}
-
-async function startSelectedCameras(): Promise<void> {
-  const deviceId = cameraSelect.value || undefined;
+async function syncActiveStreams(): Promise<void> {
   const targetFps = Number(fpsSelect.value) || 60;
+  const needLaptop = viewMode === 'face-on' || viewMode === 'dual';
+  const needPhone = viewMode === 'dtl' || viewMode === 'dual';
 
-  camStatusPill.textContent = 'Connecting...';
-  camStatusPill.className = 'hud-pill status-pill';
-
-  try {
-    const stats = await primaryCamManager.startCamera(deviceId, targetFps);
-    camStatusPill.textContent = '● LIVE';
-    camStatusPill.className = 'hud-pill status-pill connected';
-    camResPill.textContent = `${stats.width} × ${stats.height}`;
-    statDevice.textContent = stats.deviceLabel;
-    statRes.textContent = `${stats.width}×${stats.height}`;
-  } catch (err: any) {
-    console.error('Primary camera start failed:', err);
-    camStatusPill.textContent = 'Camera Error';
-    camStatusPill.className = 'hud-pill status-pill error';
-  }
-
-  if (angleMode === 'dual') {
-    const dtlDeviceId = cameraSelectDtl.value || undefined;
-    if (dtlDeviceId && dtlDeviceId !== deviceId) {
-      try {
-        await dtlCamManager.startCamera(dtlDeviceId, targetFps);
-      } catch (err) {
-        console.warn('Secondary DTL camera start failed:', err);
-      }
+  // 1. Laptop Camera (Landscape)
+  if (needLaptop) {
+    const laptopId = laptopCameraSelect.value || undefined;
+    laptopStatusPill.textContent = 'Connecting...';
+    laptopStatusPill.className = 'hud-pill status-pill';
+    try {
+      const stats = await laptopCamManager.startCamera(laptopId, targetFps);
+      laptopStatusPill.textContent = '● LIVE';
+      laptopStatusPill.className = 'hud-pill status-pill connected';
+      laptopResPill.textContent = `${stats.width} × ${stats.height}`;
+      statLaptopDevice.textContent = stats.deviceLabel;
+    } catch (err) {
+      console.error('Laptop camera start failed:', err);
+      laptopStatusPill.textContent = 'Camera Error';
+      laptopStatusPill.className = 'hud-pill status-pill error';
     }
   } else {
-    dtlCamManager.stop();
+    laptopCamManager.stop();
+  }
+
+  // 2. Phone DroidCam (Portrait, rotated 90° without zoom)
+  if (needPhone) {
+    const phoneId = phoneCameraSelect.value || undefined;
+    phoneStatusPill.textContent = 'Connecting...';
+    phoneStatusPill.className = 'hud-pill status-pill';
+    try {
+      const stats = await phoneCamManager.startCamera(phoneId, targetFps);
+      phoneStatusPill.textContent = '● LIVE';
+      phoneStatusPill.className = 'hud-pill status-pill connected';
+      statPhoneDevice.textContent = stats.deviceLabel;
+      syncPhonePortraitRotation();
+    } catch (err) {
+      console.error('Phone DroidCam start failed:', err);
+      phoneStatusPill.textContent = 'Camera Error';
+      phoneStatusPill.className = 'hud-pill status-pill error';
+    }
+  } else {
+    phoneCamManager.stop();
   }
 }
 
-// Per-frame callbacks
-primaryCamManager.onFrame((_video, _timestampMs, measuredFps) => {
-  camFpsPill.textContent = `${measuredFps} FPS`;
-  camFpsPill.className = `hud-pill fps-pill ${measuredFps >= 45 ? 'good' : 'warn'}`;
-  statFps.textContent = `${measuredFps} fps`;
-
-  const stats = primaryCamManager.getStreamStats();
+// Per-frame telemetry callbacks
+laptopCamManager.onFrame((_video, _timestampMs, measuredFps) => {
+  laptopFpsPill.textContent = `${measuredFps} FPS`;
+  laptopFpsPill.className = `hud-pill fps-pill ${measuredFps >= 45 ? 'good' : 'warn'}`;
+  const stats = laptopCamManager.getStreamStats();
   if (stats.width && stats.height) {
-    camResPill.textContent = `${stats.width} × ${stats.height}`;
-    statRes.textContent = `${stats.width}×${stats.height}`;
+    laptopResPill.textContent = `${stats.width} × ${stats.height}`;
+    statLaptopFps.textContent = `${stats.width}×${stats.height} @ ${measuredFps}fps`;
   }
-
-  if (angleMode === 'dtl') {
-    drawDownTheLineGuide(canvasEl, ctx);
-  } else {
-    drawFaceOnGuide(canvasEl, ctx);
-  }
+  drawFaceOnGuide(laptopCanvas, laptopCtx);
 });
 
-dtlCamManager.onFrame(() => {
-  if (angleMode === 'dual') {
-    drawDownTheLineGuide(canvasElDtl, ctxDtl);
+phoneCamManager.onFrame((_video, _timestampMs, measuredFps) => {
+  phoneFpsPill.textContent = `${measuredFps} FPS`;
+  phoneFpsPill.className = `hud-pill fps-pill ${measuredFps >= 45 ? 'good' : 'warn'}`;
+  const stats = phoneCamManager.getStreamStats();
+  if (stats.width && stats.height) {
+    statPhoneFps.textContent = `${stats.height}×${stats.width} @ ${measuredFps}fps`;
   }
+  syncPhonePortraitRotation();
+  drawDownTheLineGuide(phoneCanvas, phoneCtx);
 });
 
 // Event Listeners
+phoneRotateBtn.addEventListener('click', () => {
+  if (phoneRotationDeg === 90) phoneRotationDeg = -90;
+  else if (phoneRotationDeg === -90) phoneRotationDeg = 0;
+  else phoneRotationDeg = 90;
+
+  phoneRotateBtn.textContent = `⟳ ${phoneRotationDeg}°`;
+  syncPhonePortraitRotation();
+});
+
 angleToggle.addEventListener('click', (e) => {
   const btn = (e.target as HTMLElement).closest('.seg-btn') as HTMLButtonElement | null;
   if (!btn) return;
-  const newAngle = btn.dataset.angle as CameraAngleMode;
-  if (!newAngle || newAngle === angleMode) return;
+  const newMode = btn.dataset.angle as ViewMode;
+  if (!newMode || newMode === viewMode) return;
 
-  angleMode = newAngle;
+  viewMode = newMode;
   angleToggle.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
   btn.classList.add('active');
 
-  // Auto-select phone camera when switching to DTL mode if one is available
-  const phoneCam = availableDevices.find((d) => d.isPhoneCam);
-  const laptopCam = availableDevices.find((d) => !d.isPhoneCam);
-  if (angleMode === 'dtl' && phoneCam) {
-    cameraSelect.value = phoneCam.deviceId;
-    // DTL behind-the-golfer view shouldn't be mirrored by default so left/right path is true
-    isMirrored = false;
-  } else if (angleMode === 'face-on' && laptopCam) {
-    cameraSelect.value = laptopCam.deviceId;
-    isMirrored = true;
-  }
-
-  videoEl.classList.toggle('mirrored', isMirrored);
-  mirrorBtn.classList.toggle('active', isMirrored);
-  mirrorBtn.textContent = `Mirror: ${isMirrored ? 'ON' : 'OFF'}`;
-
-  updateAngleAndHandUI();
-  startSelectedCameras();
+  updateViewLayout();
+  syncActiveStreams();
 });
 
-cameraSelect.addEventListener('change', () => {
-  startSelectedCameras();
+laptopCameraSelect.addEventListener('change', () => {
+  syncActiveStreams();
 });
 
-cameraSelectDtl.addEventListener('change', () => {
-  startSelectedCameras();
+phoneCameraSelect.addEventListener('change', () => {
+  syncActiveStreams();
 });
 
 refreshCamerasBtn.addEventListener('click', () => {
@@ -489,15 +478,15 @@ refreshCamerasBtn.addEventListener('click', () => {
 });
 
 fpsSelect.addEventListener('change', () => {
-  startSelectedCameras();
+  syncActiveStreams();
 });
 
 mirrorBtn.addEventListener('click', () => {
   isMirrored = !isMirrored;
-  videoEl.classList.toggle('mirrored', isMirrored);
+  laptopVideo.classList.toggle('mirrored', isMirrored);
   mirrorBtn.classList.toggle('active', isMirrored);
   mirrorBtn.textContent = `Mirror: ${isMirrored ? 'ON' : 'OFF'}`;
-  updateAngleAndHandUI();
+  updateViewLayout();
 });
 
 guideBtn.addEventListener('click', () => {
@@ -516,19 +505,14 @@ handednessToggle.addEventListener('click', (e) => {
   handedness = hand;
   handednessToggle.querySelectorAll('.seg-btn').forEach((b) => b.classList.remove('active'));
   btn.classList.add('active');
-  updateAngleAndHandUI();
+  updateViewLayout();
 });
 
-videoUpload.addEventListener('change', async () => {
-  const file = videoUpload.files?.[0];
-  if (!file) return;
-  const stats = await primaryCamManager.startVideoFile(file);
-  camStatusPill.textContent = '▶ VIDEO FILE';
-  camStatusPill.className = 'hud-pill status-pill connected';
-  statDevice.textContent = stats.deviceLabel;
-  statRes.textContent = `${stats.width}×${stats.height}`;
+window.addEventListener('resize', () => {
+  syncPhonePortraitRotation();
+  redrawOverlays();
 });
 
 // Initialize on load
-updateAngleAndHandUI();
+updateViewLayout();
 populateCameras(true);

@@ -30,15 +30,12 @@ export class CameraManager {
    * Requests initial camera permission and returns all video input devices,
    * flagging DroidCam / Iriun / Camo / EpocCam phone cameras.
    */
-  async listDevices(): Promise<CameraDevice[]> {
-    // Ensure permissions are granted so device labels are populated
-    if (!this.currentStream) {
-      try {
-        const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        tempStream.getTracks().forEach((t) => t.stop());
-      } catch (err) {
-        console.warn('Initial camera permission check failed or denied:', err);
-      }
+  static async listDevices(): Promise<CameraDevice[]> {
+    try {
+      const tempStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      tempStream.getTracks().forEach((t) => t.stop());
+    } catch (err) {
+      console.warn('Initial camera permission check failed or denied:', err);
     }
 
     const devices = await navigator.mediaDevices.enumerateDevices();
@@ -56,33 +53,30 @@ export class CameraManager {
   }
 
   /**
-   * Starts the selected camera device, requesting 60fps @ 720p ideally,
-   * and gracefully falling back if the virtual webcam driver rejects high FPS constraints.
+   * Starts the selected camera device without forcing crop/zoom resolution constraints
+   * so DroidCam and the laptop webcam stream at their native field of view and orientation.
    */
   async startCamera(deviceId?: string, targetFps = 60): Promise<StreamStats> {
     this.stop();
 
-    const baseVideoConstraints: MediaTrackConstraints = {
-      width: { ideal: 1280 },
-      height: { ideal: 720 },
-      frameRate: { ideal: targetFps, min: 24 },
+    const videoConstraints: MediaTrackConstraints = {
+      frameRate: { ideal: targetFps },
     };
 
     if (deviceId) {
-      baseVideoConstraints.deviceId = { exact: deviceId };
+      videoConstraints.deviceId = { exact: deviceId };
     }
 
     try {
       this.currentStream = await navigator.mediaDevices.getUserMedia({
-        video: baseVideoConstraints,
+        video: videoConstraints,
         audio: false,
       });
     } catch (firstErr) {
-      console.warn('Ideal camera constraints rejected by driver, falling back to relaxed constraints:', firstErr);
-      // DroidCam / Iriun Virtual Drivers on Windows sometimes reject frameRate/resolution constraints
+      console.warn('Camera constraints rejected, falling back to basic deviceId constraint:', firstErr);
       const fallbackConstraints: MediaTrackConstraints = deviceId
         ? { deviceId: { exact: deviceId } }
-        : true as unknown as MediaTrackConstraints;
+        : (true as unknown as MediaTrackConstraints);
 
       this.currentStream = await navigator.mediaDevices.getUserMedia({
         video: fallbackConstraints,
@@ -132,8 +126,8 @@ export class CameraManager {
     const track = this.currentStream?.getVideoTracks()[0];
     const settings = track?.getSettings();
     return {
-      width: settings?.width || this.videoEl.videoWidth || 0,
-      height: settings?.height || this.videoEl.videoHeight || 0,
+      width: this.videoEl.videoWidth || settings?.width || 0,
+      height: this.videoEl.videoHeight || settings?.height || 0,
       reportedFps: Math.round(settings?.frameRate || 0),
       measuredFps: this.measuredFps,
       deviceLabel: track?.label || 'Video Stream',
@@ -148,7 +142,6 @@ export class CameraManager {
     const step = (now: number) => {
       if (!this.isRunning) return;
 
-      // Track rolling FPS over the last 30 video frames
       this.frameTimes.push(now);
       while (this.frameTimes.length > 30) {
         this.frameTimes.shift();
@@ -198,4 +191,3 @@ export class CameraManager {
     }
   }
 }
-

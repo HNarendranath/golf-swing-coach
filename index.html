@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Golf Swing Coach — Camera & Phone Link</title>
+    <title>Golf Swing Coach — Camera &amp; Phone Link</title>
   </head>
   <body>
     <div id="app">
@@ -16,42 +16,42 @@
         </div>
 
         <div class="controls-bar">
-          <!-- Camera Angle Mode -->
+          <!-- View Mode -->
           <div class="control-group">
-            <label>Camera Angle & Role</label>
+            <label>View Mode</label>
             <div class="segmented" id="angle-toggle">
-              <button type="button" class="seg-btn active" data-angle="face-on" title="Laptop Webcam facing your chest">
+              <button type="button" class="seg-btn" data-angle="face-on" title="Laptop Webcam facing your chest (Landscape)">
                 💻 Face-On (Laptop)
               </button>
-              <button type="button" class="seg-btn" data-angle="dtl" title="Phone perpendicular behind the swing looking at target">
+              <button type="button" class="seg-btn" data-angle="dtl" title="Phone DroidCam perpendicular behind the swing (Portrait)">
                 📱 Down-The-Line (Phone)
               </button>
-              <button type="button" class="seg-btn" data-angle="dual" title="Show both Laptop (Face-On) and Phone (Behind Swing) side by side">
+              <button type="button" class="seg-btn active" data-angle="dual" title="Laptop Landscape (Front) + Phone Portrait (Behind)">
                 ⚡ Dual View
               </button>
             </div>
           </div>
 
-          <!-- Primary Camera Selector -->
-          <div class="control-group" id="primary-cam-group">
-            <label for="camera-select" id="primary-cam-label">Laptop Camera (Face-On)</label>
+          <!-- Dedicated Laptop Camera Selector -->
+          <div class="control-group" id="laptop-cam-group">
+            <label for="laptop-camera-select">💻 Laptop Cam (Front-On)</label>
             <div class="row-inline">
-              <select id="camera-select" title="Select Camera">
-                <option value="">Detecting cameras...</option>
+              <select id="laptop-camera-select" title="Select Laptop Webcam (Landscape)">
+                <option value="">Detecting...</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Dedicated Phone (DroidCam) Selector -->
+          <div class="control-group" id="phone-cam-group">
+            <label for="phone-camera-select">📱 Phone Cam (DroidCam)</label>
+            <div class="row-inline">
+              <select id="phone-camera-select" title="Select DroidCam / Phone Camera (Portrait)">
+                <option value="">Detecting...</option>
               </select>
               <button id="refresh-cameras-btn" class="btn btn-icon" title="Refresh camera list">
                 ↻
               </button>
-            </div>
-          </div>
-
-          <!-- Secondary Camera Selector (visible in Dual View) -->
-          <div class="control-group hidden" id="secondary-cam-group">
-            <label for="camera-select-dtl">Phone Camera (Behind Swing)</label>
-            <div class="row-inline">
-              <select id="camera-select-dtl" title="Select Phone Camera (Down-The-Line)">
-                <option value="">Select phone camera...</option>
-              </select>
             </div>
           </div>
 
@@ -75,18 +75,14 @@
 
           <!-- Mirror & Alignment Guide Toggles -->
           <div class="control-group">
-            <label>View Options</label>
+            <label>Options</label>
             <div class="row-inline">
-              <button id="mirror-btn" class="btn btn-toggle active" title="Flip video horizontally">
+              <button id="mirror-btn" class="btn btn-toggle active" title="Flip laptop video horizontally">
                 Mirror: ON
               </button>
               <button id="guide-btn" class="btn btn-toggle active" title="Show camera framing guides">
                 Guide: ON
               </button>
-              <label class="btn btn-secondary file-label" title="Load a pre-recorded swing video file">
-                Load Video
-                <input type="file" id="video-upload" accept="video/*" hidden />
-              </label>
             </div>
           </div>
         </div>
@@ -96,38 +92,46 @@
       <main class="workspace">
         <!-- Left/Main: Live Camera Feed(s) + Framing Overlay -->
         <section class="video-panel" id="video-panel">
-          <!-- Primary Viewport -->
-          <div class="video-container" id="video-container">
-            <video id="webcam-video" autoplay playsinline muted></video>
-            <canvas id="overlay-canvas"></canvas>
+          <!-- Stage 1: Laptop Front-On (Landscape) -->
+          <div class="video-stage" id="laptop-stage">
+            <div class="video-container landscape-frame" id="laptop-container">
+              <video id="laptop-video" autoplay playsinline muted></video>
+              <canvas id="laptop-canvas"></canvas>
 
-            <div class="hud-top-left">
-              <span class="hud-pill status-pill" id="cam-status-pill">Connecting...</span>
-              <span class="hud-pill angle-pill" id="cam-angle-pill">💻 Face-On (Front)</span>
-              <span class="hud-pill" id="cam-res-pill">-- × --</span>
-              <span class="hud-pill fps-pill" id="cam-fps-pill">-- FPS</span>
-            </div>
+              <div class="hud-top-left">
+                <span class="hud-pill status-pill" id="laptop-status-pill">Connecting...</span>
+                <span class="hud-pill angle-pill">💻 Laptop Front-On</span>
+                <span class="hud-pill" id="laptop-res-pill">-- × --</span>
+                <span class="hud-pill fps-pill" id="laptop-fps-pill">-- FPS</span>
+              </div>
 
-            <div class="hud-top-right">
-              <div class="target-indicator" id="target-indicator">
-                Target Direction ➔
+              <div class="hud-top-right">
+                <div class="target-indicator" id="laptop-target-indicator">
+                  ⬅ Target Direction
+                </div>
               </div>
             </div>
           </div>
 
-          <!-- Secondary Viewport (for Dual View: Down-The-Line Phone Feed) -->
-          <div class="video-container hidden" id="video-container-dtl">
-            <video id="webcam-video-dtl" autoplay playsinline muted></video>
-            <canvas id="overlay-canvas-dtl"></canvas>
+          <!-- Stage 2: Phone DroidCam Behind-Swing (Portrait, rotated 90° without zoom) -->
+          <div class="video-stage portrait-stage" id="phone-stage">
+            <div class="video-container portrait-frame" id="phone-container">
+              <video id="phone-video" autoplay playsinline muted></video>
+              <canvas id="phone-canvas"></canvas>
 
-            <div class="hud-top-left">
-              <span class="hud-pill status-pill connected" id="cam-status-pill-dtl">● PHONE DTL</span>
-              <span class="hud-pill angle-pill">📱 Down-The-Line (90° Behind)</span>
-            </div>
+              <div class="hud-top-left">
+                <span class="hud-pill status-pill" id="phone-status-pill">Connecting...</span>
+                <span class="hud-pill phone-pill">📱 DroidCam (Portrait)</span>
+                <span class="hud-pill fps-pill" id="phone-fps-pill">-- FPS</span>
+              </div>
 
-            <div class="hud-top-right">
-              <div class="target-indicator">
-                ⬆ Target (Into Screen)
+              <div class="hud-top-right">
+                <button id="phone-rotate-btn" class="hud-btn" title="Flip portrait rotation (+90° / -90°)">
+                  ⟳ 90°
+                </button>
+                <div class="target-indicator">
+                  ⬆ Target
+                </div>
               </div>
             </div>
           </div>
@@ -159,68 +163,58 @@
                 <circle cx="135" cy="55" r="10" fill="#1e293b" stroke="#f8fafc" stroke-width="2" />
                 <text x="135" y="58" fill="#f8fafc" font-size="8" font-weight="700" text-anchor="middle">YOU</text>
 
-                <!-- Laptop (Front-On / Face-On) -->
-                <rect x="95" y="122" width="80" height="22" rx="4" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1.5" />
-                <text x="135" y="136" fill="#6ee7b7" font-size="9.5" font-weight="700" text-anchor="middle">
-                  💻 LAPTOP (Front-On)
+                <!-- Laptop (Front-On / Landscape) -->
+                <rect x="87" y="122" width="96" height="22" rx="4" fill="rgba(16,185,129,0.2)" stroke="#10b981" stroke-width="1.5" />
+                <text x="135" y="136" fill="#6ee7b7" font-size="9" font-weight="700" text-anchor="middle">
+                  💻 LAPTOP (Landscape)
                 </text>
 
-                <!-- Phone (Behind Swing / Down-The-Line) -->
-                <rect x="182" y="42" width="72" height="26" rx="4" fill="rgba(245,158,11,0.2)" stroke="#f59e0b" stroke-width="1.5" />
-                <line x1="182" y1="55" x2="148" y2="55" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3,3" />
-                <text x="218" y="53" fill="#fde68a" font-size="8.5" font-weight="700" text-anchor="middle">
+                <!-- Phone (Behind Swing / Portrait) -->
+                <rect x="192" y="34" width="58" height="38" rx="4" fill="rgba(245,158,11,0.2)" stroke="#f59e0b" stroke-width="1.5" />
+                <line x1="192" y1="55" x2="148" y2="55" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="3,3" />
+                <text x="221" y="50" fill="#fde68a" font-size="8.5" font-weight="700" text-anchor="middle">
                   📱 PHONE
                 </text>
-                <text x="218" y="63" fill="#fcd34d" font-size="7.5" text-anchor="middle">
-                  (Behind Swing)
+                <text x="221" y="62" fill="#fcd34d" font-size="7.5" text-anchor="middle">
+                  (Portrait)
                 </text>
               </svg>
             </div>
             <p class="diagram-caption">
-              <strong>Laptop (Front-On):</strong> Faces your chest — tracks head sway, hip shift, shoulder turn &amp; lead arm.<br/>
-              <strong>Phone (Behind / 90°):</strong> Looks down the target line behind your hands — tracks spine tilt, swing plane &amp; draw/fade path.
+              <strong>Laptop Cam (Landscape):</strong> Built-in webcam facing your chest.<br/>
+              <strong>Phone Cam (Portrait):</strong> Linked to <strong>DroidCam</strong> behind your hands looking down the target line.
             </p>
           </div>
 
           <div class="card">
-            <h2>📱 Camera Status</h2>
+            <h2>📱 Camera Assignment</h2>
             <div id="phone-detect-banner" class="banner banner-info">
               Checking connected video devices...
             </div>
 
             <div class="stats-grid">
               <div class="stat-box">
-                <span class="stat-label">Active Device</span>
-                <span class="stat-val" id="stat-device">—</span>
+                <span class="stat-label">Laptop Feed</span>
+                <span class="stat-val" id="stat-laptop-device">—</span>
               </div>
               <div class="stat-box">
-                <span class="stat-label">Resolution</span>
-                <span class="stat-val" id="stat-res">—</span>
+                <span class="stat-label">Phone (DroidCam)</span>
+                <span class="stat-val" id="stat-phone-device">—</span>
               </div>
               <div class="stat-box">
-                <span class="stat-label">Measured FPS</span>
-                <span class="stat-val" id="stat-fps">—</span>
+                <span class="stat-label">Laptop Res / FPS</span>
+                <span class="stat-val" id="stat-laptop-fps">—</span>
               </div>
               <div class="stat-box">
-                <span class="stat-label">Active Guide</span>
-                <span class="stat-val" id="stat-angle">Face-On</span>
+                <span class="stat-label">Phone Res / FPS</span>
+                <span class="stat-val" id="stat-phone-fps">—</span>
               </div>
             </div>
           </div>
 
           <div class="card">
             <h2 id="checklist-title">🎯 Framing Guide Explained</h2>
-            <ul class="checklist" id="checklist-items">
-              <li>
-                <strong>Head Zone (Blue Circle):</strong> Keep your head centered here from takeaway to impact (&lt; 5 cm movement).
-              </li>
-              <li>
-                <strong>Hip Level &amp; Sway Box (Green):</strong> Shows lateral hip shift away from target at the top, and weight shift toward target at impact.
-              </li>
-              <li>
-                <strong>Address Hands (Amber):</strong> Hold hands steady below hips for ~1s to auto-trigger recording.
-              </li>
-            </ul>
+            <ul class="checklist" id="checklist-items"></ul>
           </div>
         </aside>
       </main>
